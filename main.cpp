@@ -7,13 +7,22 @@
 #include <vulkan/vulkan.hpp>
 #pragma comment(lib, "vulkan-1.lib")
 
-#include <Windows.h>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+#pragma comment(lib, "glfw3.lib")
+
 #include <iostream>
 #include <set>
 #include <fstream>
 #include <string>
 #include <random>
 #include <functional>
+
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include<glm/glm.hpp>
+//#include<glm/gtc/quaternion.hpp>
+#include<glm/gtc/matrix_transform.hpp>
 
 #ifndef DBG_ASSERT
 #if defined(_WIN32)
@@ -29,10 +38,21 @@
 int main() {
 	vk::InstanceCreateInfo instanceCreateInfo;
 
-	const std::vector<const char*> requiredInstanceExtensions = {
+	std::vector<const char*> requiredInstanceExtensions = {
 		VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 	};
-	instanceCreateInfo.enabledExtensionCount = requiredInstanceExtensions.size();
+
+	glfwInit();
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	uint32_t windowExtensionCount;
+	const char** windowExtensions = glfwGetRequiredInstanceExtensions(&windowExtensionCount);
+
+	for (uint32_t i = 0;i < windowExtensionCount;i++)
+	{
+		requiredInstanceExtensions.push_back(windowExtensions[i]);
+	}
+
+	instanceCreateInfo.enabledExtensionCount = (uint32_t)requiredInstanceExtensions.size();
 	instanceCreateInfo.ppEnabledExtensionNames = requiredInstanceExtensions.data();
 
 	vk::Instance instance = vk::createInstance(instanceCreateInfo);
@@ -510,6 +530,187 @@ int main() {
 			device.destroyFence(f);
 			device.freeCommandBuffers(commandPool, singleTimeCommandBuffer);
 		}();
+
+	//screen output setup
+
+	struct {
+		uint32_t windowWidth;
+		uint32_t windowHeight;
+	} settings{ .windowWidth = 640, .windowHeight = 480 };
+
+	auto createImageView = [&device](const vk::Image& image, const vk::Format& format) {
+		return device.createImageView(
+			{
+				.image = image,
+				.viewType = vk::ImageViewType::e2D,
+				.format = format,
+				.subresourceRange = {
+					.aspectMask = vk::ImageAspectFlagBits::eColor,
+					.baseMipLevel = 0,
+					.levelCount = 1,
+					.baseArrayLayer = 0,
+					.layerCount = 1
+					}
+			});
+		};
+
+	struct VulkanImage {
+		vk::Image image;
+		vk::DeviceMemory memory;
+		vk::ImageView imageView;
+	};
+
+	auto createImage = [&createImageView, &findMemoryTypeIndex, &settings, &device, &physicalDevice]
+						(const vk::Format& format, const vk::Flags<vk::ImageUsageFlagBits>& usageFlagBits) {
+		vk::ImageCreateInfo imageCreateInfo = {
+			.imageType = vk::ImageType::e2D,
+			.format = format,
+			.extent = {
+				.width = settings.windowWidth,
+				.height = settings.windowHeight,
+				.depth = 1
+				},
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.samples = vk::SampleCountFlagBits::e1,
+			.tiling = vk::ImageTiling::eOptimal,
+			.usage = usageFlagBits,
+			.sharingMode = vk::SharingMode::eExclusive,
+			.initialLayout = vk::ImageLayout::eUndefined
+			};
+
+		vk::Image image = device.createImage(imageCreateInfo);
+
+		vk::MemoryRequirements memoryRequirements = device.getImageMemoryRequirements(image);
+
+		vk::MemoryAllocateInfo allocateInfo = {
+			.allocationSize = memoryRequirements.size,
+			.memoryTypeIndex = findMemoryTypeIndex(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
+			};
+
+		vk::DeviceMemory memory = device.allocateMemory(allocateInfo);
+
+		device.bindImageMemory(image, memory, 0);
+
+		return VulkanImage{
+			.image = image,
+			.memory = memory,
+			.imageView = createImageView(image, format)
+			};
+		};
+
+	//Create Window
+	GLFWwindow* window = glfwCreateWindow(settings.windowWidth, settings.windowHeight, "Ray Tracing (Vulkan)", nullptr, nullptr);
+	if (!window) {
+		std::cout << "Shiba" << std::endl;
+	}
+
+	//CreateSurface
+	vk::SurfaceKHR surface;
+	VkResult rres = glfwCreateWindowSurface(instance, window, nullptr, reinterpret_cast<VkSurfaceKHR*>(&surface));
+	if (rres != VK_SUCCESS) {
+		std::cout << "Shiba" << std::endl;
+	}
+	const uint32_t imageCount = 3;
+	const vk::Format swapChainImageFormat = vk::Format::eB8G8R8A8Unorm;//vk::Format::eR8G8B8A8Unorm;
+	//CreateSwapChain
+	vk::SwapchainKHR swapChain = device.createSwapchainKHR(vk::SwapchainCreateInfoKHR{
+		.surface = surface,
+		.minImageCount = imageCount,
+		.imageFormat = swapChainImageFormat,//VK_FORMAT_B8G8R8A8_UNORM
+		.imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
+		.imageExtent = {.width = settings.windowWidth,.height = settings.windowHeight},
+		.imageArrayLayers = 1,
+		.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst,
+		.imageSharingMode = vk::SharingMode::eExclusive,
+		.preTransform = physicalDevice.getSurfaceCapabilitiesKHR(surface).currentTransform,
+		.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
+		.presentMode = vk::PresentModeKHR::eFifo,//vk::PresentModeKHR::eImmediate
+		.clipped = true,
+		.oldSwapchain = nullptr
+		});
+
+	//swapchainimages
+	vk::ImageView swapChainImageViews[imageCount];
+	std::vector<vk::Image>swapChainImages = device.getSwapchainImagesKHR(swapChain);
+	for (int nn = 0;nn < imageCount;nn++)
+	{
+		auto image = swapChainImages[nn];
+		swapChainImageViews[nn] = createImageView(image, swapChainImageFormat);
+	}
+	
+	//Create Images
+	VulkanImage renderTargetImage = createImage(swapChainImageFormat, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc);
+
+	//Descriptors
+
+	vk::DescriptorSet rtDescriptorSet;
+	VulkanBuffer uniformBuffer;
+
+	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &uniformBuffer]()
+		{
+			struct UniformData
+			{
+				glm::mat4 viewInverse;
+				glm::mat4 projInverse;
+			};
+			UniformData uniformData{};
+			uniformData.projInverse = glm::inverse(glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f));
+			uniformData.viewInverse = glm::inverse(glm::lookAt(glm::vec3(0.0, 0.0, -2.5), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0)));
+
+			const vk::DeviceSize uniformBufferSize = sizeof(uniformData);
+
+			uniformBuffer = createBuffer(uniformBufferSize, vk::BufferUsageFlagBits::eUniformBuffer,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal, &uniformData);
+
+			std::vector<vk::DescriptorSetLayoutBinding> bindings = {
+				{.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
+				{.binding = 1, .descriptorType = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
+				{.binding = 2, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
+				};
+
+			vk::DescriptorSetLayout rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
+
+			std::vector<vk::DescriptorPoolSize> poolSizes = {
+				{.type = vk::DescriptorType::eStorageImage, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
+			};
+
+			vk::DescriptorPool rtDescriptorPool = device.createDescriptorPool(
+				{
+				.maxSets = 1,
+				.poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+				.pPoolSizes = poolSizes.data()
+				});
+
+			rtDescriptorSet = device.allocateDescriptorSets(
+				{
+					.descriptorPool = rtDescriptorPool,
+					.descriptorSetCount = 1,
+					.pSetLayouts = &rtDescriptorSetLayout
+				}).front();
+
+			auto renderTargetImageInfo = vk::DescriptorImageInfo{.imageView = renderTargetImage.imageView,
+				 .imageLayout = vk::ImageLayout::eGeneral
+				 };
+			auto accelerationStructureInfo = vk::WriteDescriptorSetAccelerationStructureKHR{.accelerationStructureCount = 1,
+				.pAccelerationStructures = &topAccelerationStructure.accelerationStructure
+				};
+			auto uniformBufferInfo = vk::DescriptorBufferInfo{.buffer = uniformBuffer.buffer,
+				.offset = 0,
+				.range = uniformBufferSize
+				};
+
+			std::vector<vk::WriteDescriptorSet>descriptorWrites = {
+				{.dstSet = rtDescriptorSet,.dstBinding = 0,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &renderTargetImageInfo},
+				{.pNext = &accelerationStructureInfo,
+				.dstSet = rtDescriptorSet,.dstBinding = 1,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eAccelerationStructureKHR },
+				{.dstSet = rtDescriptorSet,.dstBinding = 2,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo}
+				};
+
+				device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+		};
 
 	return 0;
 }
