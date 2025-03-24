@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.hpp>
 #pragma comment(lib, "vulkan-1.lib")
 
+#include <Windows.h>
 #include <iostream>
 #include <set>
 #include <fstream>
@@ -189,7 +190,6 @@ int main() {
 	auto deviceCreateInfo = tempDeviceInfo;
 
 	vk::Device device = physicalDevice.createDevice(deviceCreateInfo);
-
 
 	instance.destroy();
 
