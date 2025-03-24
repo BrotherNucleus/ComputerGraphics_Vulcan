@@ -7,6 +7,11 @@
 #include <vulkan/vulkan.hpp>
 #pragma comment(lib, "vulkan-1.lib")
 
+#include<shaderc/shaderc.hpp>
+#pragma comment(lib, "shadercd.lib")
+#pragma comment(lib, "shaderc_utild.lib")
+#pragma comment(lib, "shaderc_combinedd.lib")
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #pragma comment(lib, "glfw3.lib")
@@ -17,6 +22,7 @@
 #include <string>
 #include <random>
 #include <functional>
+#include <vector>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -34,6 +40,61 @@
 
 #define VK_CHECK_RESULT(f) { DBG_ASSERT(f==vk::Result(0)); }
 #define DBG_ASSERT_WARN(f, w) { { if (!f) { std::cout << w; }};DBG_ASSERT(f); }
+
+const std::string raygenShaderCode = R"(
+ #version 460
+ #extension GL_EXT_ray_tracing : enable
+
+ layout(binding=0,set=0,rgba8) uniform image2D image;
+ layout(binding=1,set=0) uniform accelerationStructureEXT topLevelAS;
+ layout(binding=2,set=0) uniform CameraProperties
+ {
+	 mat4 viewInverse;
+	 mat4 projInverse;
+ }cam;
+
+ layout(location=0) rayPayloadEXT vec3 hitValue;
+
+void main()
+{
+ const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy)+vec2(0.5);
+ const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+ vec2 d = inUV*2.0-1.0;
+
+ vec4 origin = cam.viewInverse*vec4(0,0,0,1);
+ vec4 target = cam.projInverse*vec4(d.x,d.y,1,1);
+ vec4 direction = cam.viewInverse*vec4(normalize(target.xyz),0);
+
+ float tmin=0.001;
+ float tmax=10000.0;
+
+ hitValue=vec3(0.0);
+
+ traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,origin.xyz,tmin,direction.xyz,tmax,0);
+
+ imageStore(image,ivec2(gl_LaunchIDEXT.xy),vec4(hitValue,0.0));
+ })";
+
+const std::string missShaderCode = R"(
+ #version 460
+ #extension GL_EXT_ray_tracing : enable
+ layout(location=0) rayPayloadInEXT vec3 hitValue;
+ void main()
+ {
+	hitValue = vec3(0.0, 0.0, 0.2);
+ })";
+
+const std::string closestHitShaderCode = R"(
+ #version 460
+ #extension GL_EXT_ray_tracing : enable
+ #extension GL_EXT_nonuniform_qualifier : enable
+ layout(location=0) rayPayloadInEXT vec3 hitValue;
+ hitAttributeEXT vec2 attribs;
+ void main()
+ {
+	const vec3 barycentricCoords = vec3(1.0f-attribs.x-attribs.y,attribs.x,attribs.y);
+	hitValue=barycentricCoords;
+ })";
 
 int main() {
 	vk::InstanceCreateInfo instanceCreateInfo;
@@ -645,9 +706,10 @@ int main() {
 	//Descriptors
 
 	vk::DescriptorSet rtDescriptorSet;
+	vk::DescriptorSetLayout rtDescriptorSetLayout;
 	VulkanBuffer uniformBuffer;
 
-	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &uniformBuffer]()
+	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer]()
 		{
 			struct UniformData
 			{
@@ -669,7 +731,7 @@ int main() {
 				{.binding = 2, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
 				};
 
-			vk::DescriptorSetLayout rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
+			rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
 
 			std::vector<vk::DescriptorPoolSize> poolSizes = {
 				{.type = vk::DescriptorType::eStorageImage, .descriptorCount = 1 },
@@ -711,6 +773,116 @@ int main() {
 
 				device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 		};
+
+	//Shaders
+
+	auto createShaderModule = [&device](const std::string& path) {
+		auto readBinaryFile = [](const std::string& path) {
+			std::ifstream file(path, std::ios::ate | std::ios::binary);
+			DBG_ASSERT_WARN(file.is_open(), "[Error] Failed to open file at'" + path + "'!");
+
+			size_t fileSize = (size_t)file.tellg();
+			std::vector<char> buffer(fileSize);
+			file.close();
+			return buffer;
+			};
+
+		std::vector<char> shaderCode = readBinaryFile(path);
+
+		vk::ShaderModuleCreateInfo shaderModuleCreateInfo = {
+			.codeSize = shaderCode.size(),
+			.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data())
+		};
+		return device.createShaderModule(shaderModuleCreateInfo);
+		};
+
+	auto createShaderModuleFromGLSL = [&device](const std::string& glslSourceCode, shaderc_shader_kind shaderKind)
+			{
+				const char* shaderSource = glslSourceCode.c_str();
+				//Create a shaderc compiler instance
+				shaderc::Compiler compiler;
+				shaderc::CompileOptions options;
+				//Set the targeted SPIR-V version
+				options.SetTargetSpirv(shaderc_spirv_version_1_6); //SetthedesiredSPIR - Vversion
+					//Compile the shader sourcecode
+					shaderc::SpvCompilationResult module = compiler.CompileGlslToSpv(shaderSource,
+						strlen(shaderSource),
+						shaderKind,
+						"shader.rmiss.spv",
+						options);
+				if (module.GetCompilationStatus()!=shaderc_compilation_status_success) {
+					//Handle shader compilation error
+					std::cerr << module.GetErrorMessage() << std::endl;
+					DBG_ASSERT(0);
+				}
+				//Retrieve the SPIR-V bytecode from the compilation result
+				const auto spirvCode = module.cbegin();
+				const size_t spirvSize = (size_t)(module.cend() - module.cbegin()) * 4;//uint32tochar
+				//Create a Vulkan shader module
+				vk::ShaderModuleCreateInfo createInfo{.codeSize = spirvSize,.pCode =spirvCode};
+				return device.createShaderModule(createInfo);
+			};
+
+	//Create shader modules from inline
+	vk::ShaderModule raygenModule = createShaderModuleFromGLSL(raygenShaderCode, shaderc_shader_kind::shaderc_raygen_shader);
+	vk::ShaderModule  chitModule = createShaderModuleFromGLSL(closestHitShaderCode, shaderc_shader_kind::shaderc_closesthit_shader);
+	vk::ShaderModule missModule = createShaderModuleFromGLSL(missShaderCode, shaderc_shader_kind::shaderc_miss_shader);
+
+	std::vector<vk::PipelineShaderStageCreateInfo>stages = {
+		{.stage = vk::ShaderStageFlagBits::eRaygenKHR, .module = raygenModule,.pName = "main"},
+		{.stage = vk::ShaderStageFlagBits::eMissKHR, .module = missModule, .pName = "main"},
+		{.stage = vk::ShaderStageFlagBits::eClosestHitKHR, .module = chitModule, .pName = "main"}
+		};
+
+	std::vector<vk::RayTracingShaderGroupCreateInfoKHR>groups = {
+
+		{.type = vk::RayTracingShaderGroupTypeKHR::eGeneral, 
+		.generalShader = 0, 
+		.closestHitShader = VK_SHADER_UNUSED_KHR,
+		.anyHitShader = VK_SHADER_UNUSED_KHR,
+		.intersectionShader = VK_SHADER_UNUSED_KHR},
+
+		{.type = vk::RayTracingShaderGroupTypeKHR::eGeneral, 
+		.generalShader = 1, 
+		.closestHitShader = VK_SHADER_UNUSED_KHR,
+		.anyHitShader = VK_SHADER_UNUSED_KHR,
+		.intersectionShader = VK_SHADER_UNUSED_KHR},
+
+
+		{.type = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
+		.generalShader = VK_SHADER_UNUSED_KHR,
+		.closestHitShader = 2,
+		.anyHitShader = VK_SHADER_UNUSED_KHR,
+		.intersectionShader =VK_SHADER_UNUSED_KHR}
+
+
+		};
+
+
+	vk::PipelineLayout rtPipelineLayout = device.createPipelineLayout(//vk::PipelineLayout
+		{
+		.setLayoutCount = 1,
+		.pSetLayouts = &rtDescriptorSetLayout,
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = nullptr
+		});
+	vk::PipelineLibraryCreateInfoKHR libraryCreateInfo = {.libraryCount = 0};
+	vk::RayTracingPipelineCreateInfoKHR pipelineCreateInfo = {
+		.stageCount = static_cast<uint32_t>(stages.size()),
+		.pStages = stages.data(),
+		.groupCount = static_cast<uint32_t>(groups.size()),
+		.pGroups = groups.data(),
+		.maxPipelineRayRecursionDepth = getRayTracingProperties(physicalDevice).maxRayRecursionDepth,
+		.pLibraryInfo = &libraryCreateInfo,
+		.pLibraryInterface = nullptr,
+		.layout = rtPipelineLayout,
+		.basePipelineHandle = VK_NULL_HANDLE,
+		.basePipelineIndex = 0
+	};
+	vk::Pipeline rtPipeline = device.createRayTracingPipelineKHR(nullptr, nullptr, pipelineCreateInfo, nullptr, dynamicDispatchLoader).value;
+	device.destroyShaderModule(raygenModule);
+	device.destroyShaderModule(chitModule);
+	device.destroyShaderModule(missModule);
 
 	return 0;
 }
