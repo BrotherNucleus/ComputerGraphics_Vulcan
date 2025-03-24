@@ -884,5 +884,54 @@ int main() {
 	device.destroyShaderModule(chitModule);
 	device.destroyShaderModule(missModule);
 
+	//Create shader Binding Table
+	vk::StridedDeviceAddressRegionKHR sbtRayGenAddressRegion;
+	vk::StridedDeviceAddressRegionKHR sbtMissAddressRegion;
+	vk::StridedDeviceAddressRegionKHR sbtHitAddressRegion;
+	[&device, &createBuffer, &rtPipeline, &getRayTracingProperties, &dynamicDispatchLoader, &physicalDevice]
+	(vk::StridedDeviceAddressRegionKHR& sbtRayGenAddressRegion,
+		vk::StridedDeviceAddressRegionKHR& sbtMissAddressRegion,
+		vk::StridedDeviceAddressRegionKHR& sbtHitAddressRegion)
+		{
+			vk::PhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingProperties = getRayTracingProperties(physicalDevice);
+			uint32_t baseAlignment = rayTracingProperties.shaderGroupBaseAlignment;
+			uint32_t handleSize = rayTracingProperties.shaderGroupHandleSize;
+
+			const uint32_t shaderGroupCount = 3;
+			vk::DeviceSize sbtBufferSize = baseAlignment * shaderGroupCount;
+
+			VulkanBuffer shaderBindingTableBuffer = createBuffer(sbtBufferSize,
+				vk::BufferUsageFlagBits::eShaderBindingTableKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+			std::vector<uint8_t> handles = device.getRayTracingShaderGroupHandlesKHR<uint8_t>(rtPipeline, 0, shaderGroupCount, shaderGroupCount * handleSize, dynamicDispatchLoader);
+
+			vk::DeviceAddress sbtAddress = device.getBufferAddress({ .buffer = shaderBindingTableBuffer.buffer });
+
+			sbtRayGenAddressRegion = {
+				.deviceAddress = sbtAddress + baseAlignment * 0,
+				.stride = baseAlignment,
+				.size = baseAlignment
+			};
+
+			sbtMissAddressRegion = {
+				.deviceAddress = sbtAddress + baseAlignment * 1,
+				.stride = baseAlignment,
+				.size = baseAlignment
+			};
+
+			sbtHitAddressRegion = {
+				.deviceAddress = sbtAddress + baseAlignment * 2,
+				.stride = baseAlignment,
+				.size = baseAlignment
+			};
+
+			uint8_t* sbtBufferData = static_cast<uint8_t*>(device.mapMemory(shaderBindingTableBuffer.memory, 0, sbtBufferSize));
+			memcpy(sbtBufferData, handles.data(), handleSize);
+			memcpy(sbtBufferData + baseAlignment, handles.data() + handleSize, handleSize);
+			memcpy(sbtBufferData + baseAlignment * 2, handles.data() + handleSize * 2, handleSize);
+			device.unmapMemory(shaderBindingTableBuffer.memory);
+		}(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion);
+
 	return 0;
 }
