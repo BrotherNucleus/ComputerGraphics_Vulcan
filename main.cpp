@@ -191,7 +191,11 @@ int main() {
 
 	vk::Device device = physicalDevice.createDevice(deviceCreateInfo);
 
+	vk::DispatchLoaderDynamic dynamicDispatchLoader = vk::DispatchLoaderDynamic(instance, vkGetInstanceProcAddr, device);
+
 	instance.destroy();
+
+
 
 	return 0;
 }
