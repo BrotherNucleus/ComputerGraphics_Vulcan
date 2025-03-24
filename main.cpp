@@ -2,6 +2,8 @@
 #include <thread>
 
 #define VULKAN_HPP_NO_CONSTRUCTORS
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+#define VULKAN_HPP_HAS_SPACESHIP_OPERATOR
 #include <vulkan/vulkan.hpp>
 #pragma comment(lib, "vulkan-1.lib")
 
@@ -396,6 +398,118 @@ int main() {
 				VK_CHECK_RESULT(device.waitForFences(1, &f, true, UINT64_MAX));
 				device.destroyFence(f);
 				device.freeCommandBuffers(commandPool, singleTimeCommandBuffer);
-			}();
+			};
+
+	//TLAS
+
+	auto geometryTLAS = vk::AccelerationStructureGeometryKHR{
+		.geometryType = vk::GeometryTypeKHR::eInstances,
+		.geometry = vk::AccelerationStructureGeometryDataKHR{
+		.instances = vk::AccelerationStructureGeometryInstancesDataKHR{
+		.arrayOfPointers = false
+		}
+		},
+		.flags = vk::GeometryFlagBitsKHR::eOpaque,
+		};
+
+	auto buildInfoTLAS = vk::AccelerationStructureBuildGeometryInfoKHR{.type =vk::AccelerationStructureTypeKHR::eTopLevel,
+		.flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+		.mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+		.srcAccelerationStructure = nullptr,
+		.dstAccelerationStructure = nullptr,
+		.geometryCount = 1,
+		.pGeometries = &geometryTLAS,
+		.scratchData = {}
+		};
+
+	auto buildSizesInfoTLAS = device.getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfoTLAS, { 1 }, dynamicDispatchLoader);
+
+	VulkanAccelerationStructure topAccelerationStructure;
+
+	topAccelerationStructure.structureBuffer = createBuffer(buildSizesInfoTLAS.accelerationStructureSize,
+		vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
+		vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+	topAccelerationStructure.scratchBuffer = createBuffer(buildSizesInfoTLAS.buildScratchSize,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+		vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+	//Createallocationstructure
+
+	auto createInfoTLAS = vk::AccelerationStructureCreateInfoKHR{
+		.buffer = topAccelerationStructure.structureBuffer.buffer,
+		.offset = 0,
+		.size = buildSizesInfoTLAS.accelerationStructureSize,
+		.type = vk::AccelerationStructureTypeKHR::eTopLevel
+		};
+
+	topAccelerationStructure.accelerationStructure = device.createAccelerationStructureKHR(createInfoTLAS, nullptr, dynamicDispatchLoader);
+	vk::TransformMatrixKHR vktransformMatrix;
+
+	memcpy(&vktransformMatrix.matrix, &transformMatrix.matrix, sizeof(transformMatrix));
+
+	auto accelerationStructureInstance = vk::AccelerationStructureInstanceKHR{
+		.transform = vktransformMatrix,
+		.instanceCustomIndex = 0,
+		.mask = 0xFF,
+		.instanceShaderBindingTableRecordOffset = 0,
+		.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
+		//vk::GeometryInstanceFlagBitsKHR::eTriangleFacingCullDisable,
+		};
+
+	accelerationStructureInstance.accelerationStructureReference = device.getAccelerationStructureAddressKHR({
+		.accelerationStructure =bottomAccelerationStructure.accelerationStructure}, dynamicDispatchLoader);
+
+	topAccelerationStructure.instancesBuffer = createBuffer(sizeof(vk::AccelerationStructureInstanceKHR),
+		vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+		vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
+
+	void* pInstancesBuffer = device.mapMemory(topAccelerationStructure.instancesBuffer.memory, 0,
+		sizeof(vk::AccelerationStructureInstanceKHR));
+	memcpy(pInstancesBuffer, &accelerationStructureInstance, sizeof(vk::AccelerationStructureInstanceKHR));
+	device.unmapMemory(topAccelerationStructure.instancesBuffer.memory);
+
+	buildInfoTLAS.dstAccelerationStructure = topAccelerationStructure.accelerationStructure;
+
+	buildInfoTLAS.scratchData.deviceAddress = device.getBufferAddress({
+		.buffer =topAccelerationStructure.scratchBuffer.buffer
+		});
+
+	geometryTLAS.geometry.instances.data.deviceAddress = device.getBufferAddress({
+		.buffer = topAccelerationStructure.instancesBuffer.buffer
+		});
+	//Buildtheaccelerationstructure
+	auto buildRangeInfoTLAS = vk::AccelerationStructureBuildRangeInfoKHR{
+		.primitiveCount = 1,
+		.primitiveOffset = 0,
+		.firstVertex = 0,
+		.transformOffset = 0
+		};
+	const vk::AccelerationStructureBuildRangeInfoKHR* pBuildRangeInfosTLAS[] = { & buildRangeInfoTLAS};
+	[&device, &commandPool, &computePresentQueue, &buildInfoTLAS, &pBuildRangeInfosTLAS, &dynamicDispatchLoader]()
+		{
+			vk::CommandBuffer singleTimeCommandBuffer = device.allocateCommandBuffers(
+					{
+					.commandPool = commandPool,
+					.level = vk::CommandBufferLevel::ePrimary,
+					.commandBufferCount = 1
+					}).front();
+			vk::CommandBufferBeginInfo beginInfo = {
+				.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+				};
+			VK_CHECK_RESULT(singleTimeCommandBuffer.begin(&beginInfo));
+			singleTimeCommandBuffer.buildAccelerationStructuresKHR(1, &buildInfoTLAS, pBuildRangeInfosTLAS, dynamicDispatchLoader);
+			singleTimeCommandBuffer.end();
+			vk::SubmitInfo submitInfo = {
+				.commandBufferCount = 1,
+				.pCommandBuffers = &singleTimeCommandBuffer
+				};
+			vk::Fence f = device.createFence({});
+			VK_CHECK_RESULT(computePresentQueue.submit(1, &submitInfo, f));
+			VK_CHECK_RESULT(device.waitForFences(1, &f, true, UINT64_MAX));
+			device.destroyFence(f);
+			device.freeCommandBuffers(commandPool, singleTimeCommandBuffer);
+		}();
+
 	return 0;
 }
