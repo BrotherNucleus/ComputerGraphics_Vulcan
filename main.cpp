@@ -13,6 +13,17 @@
 #include <random>
 #include <functional>
 
+#ifndef DBG_ASSERT
+#if defined(_WIN32)
+#define DBG_ASSERT(f) {if(!(f)){__debugbreak();};}
+#else
+#define DBG_ASSERT(f) { #error(platform assert todo) }
+#endif
+#endif
+
+#define VK_CHECK_RESULT(f) { DBG_ASSERT(f==vk::Result(0)); }
+#define DBG_ASSERT_WARN(f, w) { { if (!f) { std::cout << w; }};DBG_ASSERT(f); }
+
 int main() {
 	vk::InstanceCreateInfo instanceCreateInfo;
 
@@ -193,9 +204,198 @@ int main() {
 
 	vk::DispatchLoaderDynamic dynamicDispatchLoader = vk::DispatchLoaderDynamic(instance, vkGetInstanceProcAddr, device);
 
-	instance.destroy();
+	vk::Queue computePresentQueue = device.getQueue(queueId, 0);
 
+	vk::CommandPoolCreateInfo tempCommandPoolInfo;
+	tempCommandPoolInfo.queueFamilyIndex = queueId;
 
+	vk::CommandPool commandPool = device.createCommandPool(tempCommandPoolInfo);
 
+	auto findMemoryTypeIndex = [&physicalDevice](const uint32_t& memoryTypeBits, const vk::MemoryPropertyFlags& properties) {
+		vk::PhysicalDeviceMemoryProperties memoryProperties = physicalDevice.getMemoryProperties();
+
+		for (uint32_t i = 0; memoryProperties.memoryTypeCount; i++) {
+			if ((memoryTypeBits & (1 << i)) && (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+				return i;
+			}
+		}
+		DBG_ASSERT_WARN(0, "Unable to find suitable memory type!");
+		return uint32_t(0);
+	};
+
+	struct VulkanBuffer {
+		vk::Buffer			buffer;
+		vk::DeviceMemory	memory;
+		vk::DeviceAddress	address;
+	};
+
+	auto createBuffer = [&findMemoryTypeIndex, &physicalDevice, &device](const vk::DeviceSize& size,
+		const vk::Flags<vk::BufferUsageFlagBits>& usage,
+		const vk::Flags<vk::MemoryPropertyFlagBits>& memoryProperty,
+		const void* data = nullptr)
+		{
+			vk::BufferCreateInfo tempBufferInfo;
+			tempBufferInfo.size = size;
+			tempBufferInfo.usage = usage;
+			tempBufferInfo.sharingMode = vk::SharingMode::eExclusive;
+			vk::Buffer buffer = device.createBuffer(tempBufferInfo);
+
+			vk::MemoryRequirements memoryRequirements = device.getBufferMemoryRequirements(buffer);
+			
+			vk::MemoryAllocateFlagsInfo allocateFlagsInfo;
+			allocateFlagsInfo.flags = vk::MemoryAllocateFlagBits::eDeviceAddress;
+
+			vk::MemoryAllocateInfo allocateInfo;
+			allocateInfo.pNext = &allocateFlagsInfo;
+			allocateInfo.allocationSize = memoryRequirements.size;
+			allocateInfo.memoryTypeIndex = findMemoryTypeIndex(memoryRequirements.memoryTypeBits, memoryProperty);
+
+			vk::DeviceMemory memory = device.allocateMemory(allocateInfo);
+			device.bindBufferMemory(buffer, memory, 0);
+
+			if (data)
+			{
+				void* mappedMemory = device.mapMemory(memory, 0, size);
+				memcpy(mappedMemory, data, size);
+				device.unmapMemory(memory);
+			}
+
+			vk::BufferDeviceAddressInfo tempBufferDeviceAddressInfo;
+			tempBufferDeviceAddressInfo.buffer = buffer;
+
+			VulkanBuffer tempVulkanBuffer;
+			tempVulkanBuffer.buffer = buffer;
+			tempVulkanBuffer.memory = memory;
+			tempVulkanBuffer.address = device.getBufferAddress(tempBufferDeviceAddressInfo);
+
+			return tempVulkanBuffer;
+		};
+
+	//BLAS - Bottom Level Acceleration Structure (Verts/Tris)
+
+	const uint32_t numTriangles = 1;
+
+	struct Vertex {
+		float pos[3];
+	};
+	const std::vector<Vertex> vertices = {
+		{{ 1.0f, 1.0f, 0.0f } },
+		{{ -1.0f, 1.0f, 0.0f} },
+		{{ 0.0f, -1.0f, 0.0f} }
+	};
+
+	std::vector<uint32_t> indeces = { 0, 1, 2 };
+	uint32_t indexCount = static_cast<uint32_t>(indeces.size());
+
+	const VkTransformMatrixKHR transformMatrix = {
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f };
+
+	const vk::BufferUsageFlags usageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress;
+	const vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal;
+
+	VulkanBuffer vertexBuffer = createBuffer(vertices.size() * sizeof(Vertex), usageFlags, memoryFlags, vertices.data());
+	VulkanBuffer indexBuffer = createBuffer(indeces.size() * sizeof(uint32_t), usageFlags, memoryFlags, indeces.data());
+	VulkanBuffer transformBuffer = createBuffer(sizeof(VkTransformMatrixKHR), usageFlags, memoryFlags, &transformMatrix);
+
+	vk::DeviceOrHostAddressConstKHR vertexBufferDeviceAddress;
+	vertexBufferDeviceAddress.deviceAddress = vertexBuffer.address;	
+	
+	vk::DeviceOrHostAddressConstKHR indexBufferDeviceAddress;
+	indexBufferDeviceAddress.deviceAddress = indexBuffer.address;	
+	
+	vk::DeviceOrHostAddressConstKHR transformBufferDeviceAddress;
+	transformBufferDeviceAddress.deviceAddress = transformBuffer.address;
+
+	vk::AccelerationStructureGeometryKHR geometry = {
+		.geometryType = vk::GeometryTypeKHR::eTriangles,
+		.geometry = vk::AccelerationStructureGeometryTrianglesDataKHR{
+			.vertexFormat = vk::Format::eR32G32B32A32Sfloat,
+			.vertexData = vertexBufferDeviceAddress,
+			.vertexStride = sizeof(Vertex),
+			.maxVertex = 0,
+			.indexType = vk::IndexType::eUint32,
+			.indexData = indexBufferDeviceAddress,
+			.transformData = transformBufferDeviceAddress
+			},
+			.flags = vk::GeometryFlagBitsKHR::eOpaque };
+
+	vk::AccelerationStructureBuildGeometryInfoKHR buildInfo = {
+		.type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+		.flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+		.mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+		.srcAccelerationStructure = nullptr,
+		.dstAccelerationStructure = nullptr,
+		.geometryCount = 1,
+		.pGeometries = &geometry,
+		.scratchData = {}
+		};
+
+	vk::AccelerationStructureBuildSizesInfoKHR buildSizesInfo = device.getAccelerationStructureBuildSizesKHR(
+			vk::AccelerationStructureBuildTypeKHR::eDevice,
+			buildInfo,
+			numTriangles,
+			dynamicDispatchLoader);
+
+	struct VulkanAccelerationStructure{
+		 vk::AccelerationStructureKHR accelerationStructure;
+		 VulkanBuffer structureBuffer;
+		 VulkanBuffer scratchBuffer;
+		 VulkanBuffer instancesBuffer;
+		 };
+	VulkanAccelerationStructure bottomAccelerationStructure;
+	//Allocatebuffersforaccelerationstructure
+	bottomAccelerationStructure.structureBuffer = createBuffer(buildSizesInfo.accelerationStructureSize,
+		vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
+		vk::MemoryPropertyFlagBits::eDeviceLocal);
+	bottomAccelerationStructure.scratchBuffer = createBuffer(buildSizesInfo.buildScratchSize,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+		vk::MemoryPropertyFlagBits::eDeviceLocal);
+	//CREATEtheaccelerationsturcture
+	vk::AccelerationStructureCreateInfoKHR createInfo = {
+	.buffer = bottomAccelerationStructure.structureBuffer.buffer,
+	.offset = 0,
+	.size = buildSizesInfo.accelerationStructureSize,
+	.type = vk::AccelerationStructureTypeKHR::eBottomLevel
+	};
+	bottomAccelerationStructure.accelerationStructure = device.createAccelerationStructureKHR(createInfo, nullptr, dynamicDispatchLoader);
+	//Fillintheremainingmetainfo
+	buildInfo.dstAccelerationStructure = bottomAccelerationStructure.accelerationStructure;
+	buildInfo.scratchData.deviceAddress = device.getBufferAddress({.buffer =bottomAccelerationStructure.scratchBuffer.buffer});
+	//BUILDtheaccelerationstructure
+	vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo = {
+	.primitiveCount = numTriangles,
+	.primitiveOffset = 0,
+	.firstVertex = 0,
+	.transformOffset = 0
+	};
+
+	const vk::AccelerationStructureBuildRangeInfoKHR* pBuildRangeInfos[] = {&buildRangeInfo};
+	[&device, &commandPool, &computePresentQueue, &buildInfo, &pBuildRangeInfos, & dynamicDispatchLoader]()
+			{
+				vk::CommandBuffer singleTimeCommandBuffer = device.allocateCommandBuffers(
+						{
+						.commandPool = commandPool,
+						.level = vk::CommandBufferLevel::ePrimary,
+						.commandBufferCount = 1
+						}).front();
+
+				vk::CommandBufferBeginInfo beginInfo = {
+				.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+				};
+				VK_CHECK_RESULT(singleTimeCommandBuffer.begin(&beginInfo));
+				singleTimeCommandBuffer.buildAccelerationStructuresKHR(1, &buildInfo,pBuildRangeInfos, dynamicDispatchLoader);
+				singleTimeCommandBuffer.end();
+				vk::SubmitInfo submitInfo = {
+				.commandBufferCount = 1,
+				.pCommandBuffers = &singleTimeCommandBuffer
+				};
+				vk::Fence f = device.createFence({});
+				VK_CHECK_RESULT(computePresentQueue.submit(1, &submitInfo, f));
+				VK_CHECK_RESULT(device.waitForFences(1, &f, true, UINT64_MAX));
+				device.destroyFence(f);
+				device.freeCommandBuffers(commandPool, singleTimeCommandBuffer);
+			}();
 	return 0;
 }
