@@ -356,37 +356,66 @@ int main() {
 
 	//BLAS - Bottom Level Acceleration Structure (Verts/Tris)
 
-	const uint32_t numTriangles = 12;
-
 	struct Vertex {
 		float pos[3];
 	};
-	const std::vector<Vertex> vertices = {
-		{{ -1.0f, -1.0f, -1.0f } },
-		{{ 1.0f, -1.0f, -1.0f} },
-		{{ 1.0f, 1.0f, -1.0f} },
-		{{ -1.0f, 1.0f, -1.0f} },
-		{{ -1.0f, 1.0f, 1.0f} },
-		{{ 1.0f, 1.0f, 1.0f} },
-		{{ 1.0f, -1.0f, 1.0f} },
-		{{ -1.0f, -1.0f, 1.0f} }
-	};
+	std::vector<Vertex> vertices;
+	std::vector<uint32_t> indeces;
 
-	std::vector<uint32_t> indeces = { 
-		0, 2, 1, 
-		0, 3, 2, 
-		2, 3, 4, 
-		2, 4, 5, 
-		1, 2, 5, 
-		1, 5, 6, 
-		0, 7, 4, 
-		0, 4, 3, 
-		5, 4, 7, 
-		5, 7, 6, 
-		0, 6, 7, 
-		0, 1, 6 
-	};
+	const float radius = 1.0f;
+	float x, y, z, xy;
+
+	const float PI = 3.14f;
+	const int sectorCount = 32;
+	const int stackCount = 32;
+	
+	float sectorStep = 2 * PI / sectorCount;
+	float stackStep = PI / stackCount;
+	float sectorAngle, stackAngle;
+
+	for (int i = 0; i <= stackCount; i++)
+	{
+		stackAngle = PI / 2 - i * stackStep;
+		xy = radius * cosf(stackAngle);
+		z = radius * sinf(stackAngle);
+
+		for (int j = 0; j <= sectorCount; j++)
+		{
+			sectorAngle = j * sectorStep;
+
+			x = xy * cosf(sectorAngle);
+			y = xy * sinf(sectorAngle);
+
+			Vertex v0 = { x, y, z };
+			vertices.push_back(v0);
+		}
+	}
+
+	int k1, k2;
+	for (int i = 0; i < stackCount; i++) {
+		k1 = i * (sectorCount + 1);
+		k2 = k1 + sectorCount + 1;
+
+		for (int j = 0; j < sectorCount; j++) {
+			if (i != 0) {
+				indeces.push_back(k1);
+				indeces.push_back(k2);
+				indeces.push_back(k1 + 1);
+			}
+
+			if (i != (stackCount - 1)) {
+				indeces.push_back(k1 + 1);
+				indeces.push_back(k2);
+				indeces.push_back(k2 + 1);
+			}
+			k1++;
+			k2++;
+		}
+	}
+
+	uint32_t vertexCount = static_cast<uint32_t>(vertices.size());
 	uint32_t indexCount = static_cast<uint32_t>(indeces.size());
+	const uint32_t numTriangles = indexCount / 3;
 
 	const VkTransformMatrixKHR transformMatrix = {
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -737,6 +766,7 @@ int main() {
 			};
 			UniformData uniformData{};
 			uniformData.projInverse = glm::inverse(glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f));
+			//uniformData.projInverse = glm::inverse(glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f));
 			uniformData.viewInverse = glm::inverse(glm::lookAt(glm::vec3(0.0, 0.0, -2.5), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0)));
 
 			const vk::DeviceSize uniformBufferSize = sizeof(uniformData);
@@ -1062,7 +1092,7 @@ int main() {
 	vk::Semaphore semaphore = device.createSemaphore({});
 	vk::Semaphore semaphore2 = device.createSemaphore({});
 	//----------------RenderLoop
-	float yAngle = 0;
+	float yAngle = 0.8f;
 	while (!glfwWindowShouldClose(window))
 	{
 		//Essentiallthecameradata
@@ -1077,13 +1107,14 @@ int main() {
 					memcpy(data, &uniformData, sizeof(uniformData));
 					device.unmapMemory(uniformBuffer.memory);
 				};
-		float dist = 2.5f;
+		float dist = 2.5;
 		yAngle += 0.05f;
 		glm::mat4 ident(1.0f);
 		glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
 		UniformData uniformData{};
 		uniformData.projInverse = glm::inverse(glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f));
+		//uniformData.projInverse = glm::inverse(glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f));
 		uniformData.viewInverse = glm::inverse(glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0)));
 		updateUniformBuffer(uniformData);
 
