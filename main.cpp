@@ -356,18 +356,36 @@ int main() {
 
 	//BLAS - Bottom Level Acceleration Structure (Verts/Tris)
 
-	const uint32_t numTriangles = 1;
+	const uint32_t numTriangles = 12;
 
 	struct Vertex {
 		float pos[3];
 	};
 	const std::vector<Vertex> vertices = {
-		{{ 1.0f, 1.0f, 0.0f } },
-		{{ -1.0f, 1.0f, 0.0f} },
-		{{ 0.0f, -1.0f, 0.0f} }
+		{{ -1.0f, -1.0f, -1.0f } },
+		{{ 1.0f, -1.0f, -1.0f} },
+		{{ 1.0f, 1.0f, -1.0f} },
+		{{ -1.0f, 1.0f, -1.0f} },
+		{{ -1.0f, 1.0f, 1.0f} },
+		{{ 1.0f, 1.0f, 1.0f} },
+		{{ 1.0f, -1.0f, 1.0f} },
+		{{ -1.0f, -1.0f, 1.0f} }
 	};
 
-	std::vector<uint32_t> indeces = { 0, 1, 2 };
+	std::vector<uint32_t> indeces = { 
+		0, 2, 1, 
+		0, 3, 2, 
+		2, 3, 4, 
+		2, 4, 5, 
+		1, 2, 5, 
+		1, 5, 6, 
+		0, 7, 4, 
+		0, 4, 3, 
+		5, 4, 7, 
+		5, 7, 6, 
+		0, 6, 7, 
+		0, 1, 6 
+	};
 	uint32_t indexCount = static_cast<uint32_t>(indeces.size());
 
 	const VkTransformMatrixKHR transformMatrix = {
