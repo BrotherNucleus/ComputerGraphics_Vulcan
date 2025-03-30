@@ -588,13 +588,22 @@ int main() {
 	accelerationStructureInstance.accelerationStructureReference = device.getAccelerationStructureAddressKHR({
 		.accelerationStructure =bottomAccelerationStructure.accelerationStructure}, dynamicDispatchLoader);
 
-	topAccelerationStructure.instancesBuffer = createBuffer(sizeof(vk::AccelerationStructureInstanceKHR),
+	VkTransformMatrixKHR vktransformMatrix2 = vktransformMatrix;
+	vktransformMatrix2.matrix[0][3] = 2.0f;
+
+	auto accelerationStructureInstance2 = accelerationStructureInstance;
+	accelerationStructureInstance2.transform = vktransformMatrix2;
+
+	topAccelerationStructure.instancesBuffer = createBuffer(2 * sizeof(vk::AccelerationStructureInstanceKHR),
 		vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
 		vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
 
 	void* pInstancesBuffer = device.mapMemory(topAccelerationStructure.instancesBuffer.memory, 0,
-		sizeof(vk::AccelerationStructureInstanceKHR));
-	memcpy(pInstancesBuffer, &accelerationStructureInstance, sizeof(vk::AccelerationStructureInstanceKHR));
+		2 * sizeof(vk::AccelerationStructureInstanceKHR));
+
+	vk::AccelerationStructureInstanceKHR instances[] = { accelerationStructureInstance, accelerationStructureInstance2 };
+
+	memcpy(pInstancesBuffer, instances, 2 * sizeof(vk::AccelerationStructureInstanceKHR));
 	device.unmapMemory(topAccelerationStructure.instancesBuffer.memory);
 
 	buildInfoTLAS.dstAccelerationStructure = topAccelerationStructure.accelerationStructure;
@@ -608,7 +617,7 @@ int main() {
 		});
 	//Buildtheaccelerationstructure
 	auto buildRangeInfoTLAS = vk::AccelerationStructureBuildRangeInfoKHR{
-		.primitiveCount = 1,
+		.primitiveCount = 2,
 		.primitiveOffset = 0,
 		.firstVertex = 0,
 		.transformOffset = 0
@@ -1107,7 +1116,7 @@ int main() {
 					memcpy(data, &uniformData, sizeof(uniformData));
 					device.unmapMemory(uniformBuffer.memory);
 				};
-		float dist = 2.5;
+		float dist = 7.0f;
 		yAngle += 0.05f;
 		glm::mat4 ident(1.0f);
 		glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
