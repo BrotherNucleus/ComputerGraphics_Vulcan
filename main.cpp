@@ -49,8 +49,9 @@ const std::string raygenShaderCode = R"(
  layout(binding=1,set=0) uniform accelerationStructureEXT topLevelAS;
  layout(binding=2,set=0) uniform CameraProperties
  {
-	 mat4 viewInverse;
-	 mat4 projInverse;
+	 mat4 model;
+	 mat4 view;
+	 mat4 proj;
  }cam;
 
  layout(location=0) rayPayloadEXT vec3 hitValue;
@@ -61,9 +62,16 @@ void main()
  const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
  vec2 d = inUV*2.0-1.0;
 
- vec4 origin = cam.viewInverse*vec4(0,0,0,1);
- vec4 target = cam.projInverse*vec4(d.x,d.y,1,1);
- vec4 direction = cam.viewInverse*vec4(normalize(target.xyz),0);
+//perspective
+
+ vec4 origin = cam.model * inverse(cam.view) * vec4(0,0,0,1);
+ vec4 target = inverse(cam.proj)*vec4(d.x,d.y,1,1);
+ vec4 direction = cam.model * inverse(cam.view) * vec4(normalize(target.xyz),0);
+
+//ortho
+
+ //vec4 origin = cam.model * inverse(cam.view) * inverse(cam.proj) * vec4(d.x, d.y, 0, 1);
+ //vec4 direction = cam.model * inverse(cam.view) * vec4(0, 0, -1, 0);
 
  float tmin=0.001;
  float tmax=10000.0;
@@ -92,7 +100,7 @@ const std::string closestHitShaderCode = R"(
  hitAttributeEXT vec2 attribs;
  void main()
  {
-	const vec3 barycentricCoords = vec3(1.0f-attribs.x-attribs.y,attribs.x,attribs.y);
+	const vec3 barycentricCoords = vec3(0.5f - attribs.x,0.5f,0.5f);
 	hitValue=barycentricCoords;
  })";
 
@@ -573,9 +581,9 @@ int main() {
 
 	topAccelerationStructure.accelerationStructure = device.createAccelerationStructureKHR(createInfoTLAS, nullptr, dynamicDispatchLoader);
 	vk::TransformMatrixKHR vktransformMatrix;
-
 	memcpy(&vktransformMatrix.matrix, &transformMatrix.matrix, sizeof(transformMatrix));
 
+	vktransformMatrix.matrix[0][3] = -2.0f;
 	auto accelerationStructureInstance = vk::AccelerationStructureInstanceKHR{
 		.transform = vktransformMatrix,
 		.instanceCustomIndex = 0,
@@ -770,13 +778,16 @@ int main() {
 			std::cout << "Lambda Called\n";
 			struct UniformData
 			{
-				glm::mat4 viewInverse;
-				glm::mat4 projInverse;
+				glm::mat4 model;
+				glm::mat4 view;
+				glm::mat4 proj;
 			};
 			UniformData uniformData{};
-			uniformData.projInverse = glm::inverse(glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f));
+			//uniformData.proj = glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f);
+			uniformData.proj = glm::ortho(-(float)settings.windowWidth / 2, (float)settings.windowWidth / 2, -(float)settings.windowHeight / 2, (float)settings.windowHeight / 2, 0.1f, 1000.0f);
 			//uniformData.projInverse = glm::inverse(glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f));
-			uniformData.viewInverse = glm::inverse(glm::lookAt(glm::vec3(0.0, 0.0, -2.5), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0)));
+			uniformData.view = glm::lookAt(glm::vec3(0.0, 0.0, -2.5), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
+			uniformData.model = glm::mat4(1.0f);
 
 			const vk::DeviceSize uniformBufferSize = sizeof(uniformData);
 			std::cout << "Creating uniform buffer...\n";
@@ -1107,8 +1118,9 @@ int main() {
 		//Essentiallthecameradata
 		struct UniformData
 		{
-		glm::mat4 viewInverse;
-		glm::mat4 projInverse;
+		glm::mat4 model;
+		glm::mat4 view;
+		glm::mat4 proj;
 		};
 		auto updateUniformBuffer = [&device, &uniformBuffer](UniformData& uniformData)
 				{
@@ -1116,15 +1128,26 @@ int main() {
 					memcpy(data, &uniformData, sizeof(uniformData));
 					device.unmapMemory(uniformBuffer.memory);
 				};
-		float dist = 7.0f;
-		yAngle += 0.05f;
+		float dist = 10.0f;
+		yAngle += 0.02f;
 		glm::mat4 ident(1.0f);
-		glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
-		glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
+		//glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+		//glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
+		glm::vec3 camZ = glm::vec3(0.0, 0.0, 5.0f);
 		UniformData uniformData{};
-		uniformData.projInverse = glm::inverse(glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f));
+		uniformData.model = glm::translate(uniformData.model, glm::vec3(0.0, 0.0, dist));
+		uniformData.model = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+		//uniformData.model = glm::scale(uniformData.model, glm::vec3(0.01f, 0.01f, 0.01f));
+		uniformData.view = glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
+
+		//perspective
+		uniformData.proj = glm::perspective(glm::radians(60.0f), (float)settings.windowWidth / (float)settings.windowHeight, 0.1f, 1000.0f);
+
+		//ortho
+		/*float aspectRatio = (float)settings.windowWidth / (float)settings.windowHeight;
+		uniformData.proj = glm::ortho(-2.0f * aspectRatio, 2.0f * aspectRatio, -2.0f, 2.0f, 0.1f, 1000.0f);*/
+
 		//uniformData.projInverse = glm::inverse(glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f));
-		uniformData.viewInverse = glm::inverse(glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0)));
 		updateUniformBuffer(uniformData);
 
 		glfwPollEvents();
