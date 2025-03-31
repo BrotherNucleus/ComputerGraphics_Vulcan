@@ -67,7 +67,7 @@ for (int i = 1; i <= cam.samples; i++)
 	{
 		for (int j = 1; j <= cam.samples; j++)  
 		{
-			 const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy)+vec2(0.5);
+			 const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy)+vec2(i * jitter, j * jitter);
 			 const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
 			 vec2 d = inUV*2.0-1.0;
 
@@ -118,7 +118,7 @@ const std::string closestHitShaderCode = R"(
 	hitValue=barycentricCoords;
  })";
 
-int sampleNumber = 2;
+int sampleNumber = 16;
 
 int main() {
 	vk::InstanceCreateInfo instanceCreateInfo;
