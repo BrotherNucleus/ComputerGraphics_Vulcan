@@ -49,7 +49,6 @@ const std::string raygenShaderCode = R"(
  layout(binding=1,set=0) uniform accelerationStructureEXT topLevelAS;
  layout(binding=2,set=0) uniform CameraProperties
  {
-	 mat4 model;
 	 mat4 view;
 	 mat4 proj;
 	 int samples;
@@ -73,21 +72,21 @@ for (int i = 1; i <= cam.samples; i++)
 
 			//perspective
 
-			 vec4 origin = cam.model * inverse(cam.view) * vec4(0,0,0,1);
+			 vec4 origin = inverse(cam.view) * vec4(0,0,0,1);
 			 vec4 target = inverse(cam.proj)*vec4(d.x,d.y,1,1);
-			 vec4 direction = cam.model * inverse(cam.view) * vec4(normalize(target.xyz),0);
+			 vec4 direction = inverse(cam.view) * vec4(normalize(target.xyz),0);
 
 			//ortho
 
-			 //vec4 origin = cam.model * inverse(cam.view) * inverse(cam.proj) * vec4(d.x, d.y, 0, 1);
-			 //vec4 direction = cam.model * inverse(cam.view) * vec4(0, 0, -1, 0);
+			 //vec4 origin = inverse(cam.view) * inverse(cam.proj) * vec4(d.x, d.y, 0, 1);
+			 //vec4 direction = inverse(cam.view) * vec4(0, 0, -1, 0);
 
 			 float tmin=0.001;
 			 float tmax=10000.0;
 
 			 hitValue=vec3(0.0);
 
-			 traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,origin.xyz,tmin,direction.xyz,tmax,0);
+			 traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,origin.xyz,tmin,direction.xyz,tmax, 0);
 	
 			finalColor += hitValue;
 		}
@@ -118,7 +117,7 @@ const std::string closestHitShaderCode = R"(
 	hitValue=barycentricCoords;
  })";
 
-int sampleNumber = 16;
+int sampleNumber = 2;
 
 int main() {
 	vk::InstanceCreateInfo instanceCreateInfo;
@@ -617,6 +616,7 @@ int main() {
 
 	auto accelerationStructureInstance2 = accelerationStructureInstance;
 	accelerationStructureInstance2.transform = vktransformMatrix2;
+	accelerationStructureInstance2.instanceCustomIndex = 1;
 
 	topAccelerationStructure.instancesBuffer = createBuffer(2 * sizeof(vk::AccelerationStructureInstanceKHR),
 		vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
@@ -794,7 +794,7 @@ int main() {
 			std::cout << "Lambda Called\n";
 			struct UniformData
 			{
-				glm::mat4 model;
+				//glm::mat4 model;
 				glm::mat4 view;
 				glm::mat4 proj;
 				int samples;
@@ -804,7 +804,7 @@ int main() {
 			uniformData.proj = glm::ortho(-(float)settings.windowWidth / 2, (float)settings.windowWidth / 2, -(float)settings.windowHeight / 2, (float)settings.windowHeight / 2, 0.1f, 1000.0f);
 			//uniformData.projInverse = glm::inverse(glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f));
 			uniformData.view = glm::lookAt(glm::vec3(0.0, 0.0, -2.5), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
-			uniformData.model = glm::mat4(1.0f);
+			//uniformData.model = glm::mat4(1.0f);
 			uniformData.samples = sampleNumber;
 
 			const vk::DeviceSize uniformBufferSize = sizeof(uniformData);
@@ -1136,7 +1136,7 @@ int main() {
 		//Essentiallthecameradata
 		struct UniformData
 		{
-		glm::mat4 model;
+		//glm::mat4 model;
 		glm::mat4 view;
 		glm::mat4 proj;
 		int samples;
@@ -1150,12 +1150,12 @@ int main() {
 		float dist = 10.0f;
 		yAngle += 0.02f;
 		glm::mat4 ident(1.0f);
-		//glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
-		//glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
-		glm::vec3 camZ = glm::vec3(0.0, 0.0, 5.0f);
+		glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
+		//glm::vec3 camZ = glm::vec3(0.0, 0.0, 5.0f);
 		UniformData uniformData{};
-		uniformData.model = glm::translate(uniformData.model, glm::vec3(0.0, 0.0, dist));
-		uniformData.model = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+		//uniformData.model = glm::translate(uniformData.model, glm::vec3(0.0, 0.0, dist));
+		//uniformData.model = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 		//uniformData.model = glm::scale(uniformData.model, glm::vec3(0.01f, 0.01f, 0.01f));
 		uniformData.view = glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
 		uniformData.samples = sampleNumber;
