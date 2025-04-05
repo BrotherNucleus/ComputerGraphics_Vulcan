@@ -41,6 +41,9 @@
 #define VK_CHECK_RESULT(f) { DBG_ASSERT(f==vk::Result(0)); }
 #define DBG_ASSERT_WARN(f, w) { { if (!f) { std::cout << w; }};DBG_ASSERT(f); }
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
+
 const std::string raygenShaderCode = R"(
  #version 460
  #extension GL_EXT_ray_tracing : enable
@@ -384,55 +387,40 @@ int main() {
 	};
 	std::vector<Vertex> vertices;
 	std::vector<uint32_t> indeces;
-
-	const float radius = 1.0f;
-	float x, y, z, xy;
-
-	const float PI = 3.14f;
-	const int sectorCount = 32;
-	const int stackCount = 32;
 	
-	float sectorStep = 2 * PI / sectorCount;
-	float stackStep = PI / stackCount;
-	float sectorAngle, stackAngle;
+	const char* filename = "Models/sphere.obj";
 
-	for (int i = 0; i <= stackCount; i++)
-	{
-		stackAngle = PI / 2 - i * stackStep;
-		xy = radius * cosf(stackAngle);
-		z = radius * sinf(stackAngle);
+	tinyobj::attrib_t attrib;
+	std::vector<tinyobj::shape_t> shapes;
+	std::vector<tinyobj::material_t> materials;
 
-		for (int j = 0; j <= sectorCount; j++)
-		{
-			sectorAngle = j * sectorStep;
+	//std::string warn;
+	std::string err;
 
-			x = xy * cosf(sectorAngle);
-			y = xy * sinf(sectorAngle);
+	tinyobj::LoadObj(&attrib, &shapes, &materials, &err, filename, nullptr);
 
-			Vertex v0 = { x, y, z };
-			vertices.push_back(v0);
-		}
-	}
+	for (size_t s = 0; s < shapes.size(); s++) {
+		size_t index_offset = 0;
+		for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
 
-	int k1, k2;
-	for (int i = 0; i < stackCount; i++) {
-		k1 = i * (sectorCount + 1);
-		k2 = k1 + sectorCount + 1;
+			int fv = 3;
 
-		for (int j = 0; j < sectorCount; j++) {
-			if (i != 0) {
-				indeces.push_back(k1);
-				indeces.push_back(k2);
-				indeces.push_back(k1 + 1);
+			for (size_t v = 0; v < fv; v++) {
+				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
+
+				tinyobj::real_t vx = attrib.vertices[3 * idx.vertex_index + 0];
+				tinyobj::real_t vy = attrib.vertices[3 * idx.vertex_index + 1];
+				tinyobj::real_t vz = attrib.vertices[3 * idx.vertex_index + 2];
+
+				Vertex new_vert;
+				new_vert.pos[0] = vx;
+				new_vert.pos[1] = vy;
+				new_vert.pos[2] = vz;
+
+				vertices.push_back(new_vert);
+				indeces.push_back(uint32_t(vertices.size() - 1));
 			}
-
-			if (i != (stackCount - 1)) {
-				indeces.push_back(k1 + 1);
-				indeces.push_back(k2);
-				indeces.push_back(k2 + 1);
-			}
-			k1++;
-			k2++;
+			index_offset += fv;
 		}
 	}
 

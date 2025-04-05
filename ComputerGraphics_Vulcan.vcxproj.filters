@@ -26,4 +26,14 @@
     <None Include="shader.vert" />
     <None Include="shader.frag" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tiny_obj_loader.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Object Include="Models\sphere.obj">
+      <Filter>Source Files</Filter>
+    </Object>
+  </ItemGroup>
 </Project>

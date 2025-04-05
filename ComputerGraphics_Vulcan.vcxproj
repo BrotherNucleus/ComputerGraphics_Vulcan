@@ -139,6 +139,12 @@
     <None Include="shader.frag" />
     <None Include="shader.vert" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tiny_obj_loader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Object Include="Models\sphere.obj" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
