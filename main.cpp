@@ -112,15 +112,86 @@ const std::string closestHitShaderCode = R"(
  #version 460
  #extension GL_EXT_ray_tracing : enable
  #extension GL_EXT_nonuniform_qualifier : enable
- layout(location=0) rayPayloadInEXT vec3 hitValue;
- hitAttributeEXT vec2 attribs;
+
+ layout(location=0) rayPayloadInEXT vec3 hitColor;
+ layout(location=1) rayPayloadEXT vec3 payload;
+
+ struct DirectionalLight {
+	vec3 direction;
+	vec3 color;
+};
+
+struct BufferVertex {
+	float x, y, z;
+	};
+
+struct Vertex {
+	vec3 pos;
+};
+
+layout(binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 3) buffer VertexBuffer {
+    BufferVertex vertex_buffer[];
+};
+layout(set = 0, binding = 4) buffer IndexBuffer {
+    int posI[];
+};
+layout(set = 0, binding = 5) uniform Camera {
+	 mat4 view;
+	 mat4 proj;
+	 int samples;
+}cam;
+hitAttributeEXT vec2 attribs;
+
+vec3 fetchVertex( int index) {
+	int i = posI[index];
+	BufferVertex bv = vertex_buffer[i];
+	vec3 v;
+	v = vec3(bv.x ,bv.y, bv.z);
+	return v; 
+}
+
  void main()
  {
-	const vec3 barycentricCoords = vec3(0.5f - attribs.x,0.5f,0.5f);
-	hitValue=barycentricCoords;
+	int primitiveID = gl_PrimitiveID;
+
+	vec3 v0 = fetchVertex(primitiveID*3 + 0);
+	vec3 v1 = fetchVertex(primitiveID*3 + 1);
+	vec3 v2 = fetchVertex(primitiveID*3 + 2);
+
+	v0 = gl_ObjectToWorldEXT * vec4(v0, 1);
+	v1 = gl_ObjectToWorldEXT * vec4(v1, 1);
+	v2 = gl_ObjectToWorldEXT * vec4(v2, 1);
+	
+	vec3 normal = normalize(cross(v0 - v1, v0 - v2));
+	
+	vec3 ambient = vec3(0.2, 0.2, 0.2);
+
+	DirectionalLight light;
+	light.direction = vec3(0.25f, 0.5f, 0.25f);
+	light.color = vec3(1.0f, 1.0f, 1.0f);
+	
+	vec3 lightDirection = normalize(-light.direction);
+	float lightIntensity = max(dot(normal, lightDirection), 0.0);
+	vec3 diffuse = light.color * lightIntensity;
+	vec3 surfaceColor = vec3(0.8, 0.6, 0.4);
+
+	vec4 origin = inverse(cam.view) * vec4(0, 0, 0, 1);
+	vec3 o = vec3(origin.x, origin.y, origin.z);
+	vec3 hitPos = vec3(gl_WorldRayOriginEXT + gl_RayTmaxEXT * gl_WorldRayDirectionEXT);
+	float specularStrength = 0.5;
+	vec3 viewDir = normalize(o - hitPos);
+	vec3 reflectDir = reflect(-lightDirection, normal);
+	float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+	vec3 specular = specularStrength * spec * light.color;
+
+	payload = surfaceColor * (diffuse + ambient + specular);
+	//payload = vec3((v0.x + v1.x + v2.x)/3, (v0.y + v1.y + v2.y)/3, (v0.z + v1.z + v2.z)/3);
+	//payload = v0;
+	hitColor = payload;
  })";
 
-int sampleNumber = 2;
+int sampleNumber = 1;
 
 int main() {
 	vk::InstanceCreateInfo instanceCreateInfo;
@@ -425,6 +496,7 @@ int main() {
 	}
 
 	uint32_t vertexCount = static_cast<uint32_t>(vertices.size());
+	std::cout << vertexCount << std::endl;
 	uint32_t indexCount = static_cast<uint32_t>(indeces.size());
 	const uint32_t numTriangles = indexCount / 3;
 
@@ -434,9 +506,10 @@ int main() {
 		0.0f, 0.0f, 1.0f, 0.0f };
 
 	const vk::BufferUsageFlags usageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress;
+	const vk::BufferUsageFlags VusageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eVertexBuffer;
 	const vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal;
 
-	VulkanBuffer vertexBuffer = createBuffer(vertices.size() * sizeof(Vertex), usageFlags, memoryFlags, vertices.data());
+	VulkanBuffer vertexBuffer = createBuffer(vertices.size() * sizeof(Vertex), VusageFlags, memoryFlags, vertices.data());
 	VulkanBuffer indexBuffer = createBuffer(indeces.size() * sizeof(uint32_t), usageFlags, memoryFlags, indeces.data());
 	VulkanBuffer transformBuffer = createBuffer(sizeof(VkTransformMatrixKHR), usageFlags, memoryFlags, &transformMatrix);
 
@@ -777,7 +850,7 @@ int main() {
 	vk::DescriptorSetLayout rtDescriptorSetLayout;
 	VulkanBuffer uniformBuffer;
 
-	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer]()
+	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer]()
 		{
 			std::cout << "Lambda Called\n";
 			struct UniformData
@@ -812,6 +885,9 @@ int main() {
 				{.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
 				{.binding = 1, .descriptorType = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
 				{.binding = 2, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
+				{.binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 5, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				};
 
 			rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
@@ -819,6 +895,9 @@ int main() {
 			std::vector<vk::DescriptorPoolSize> poolSizes = {
 				{.type = vk::DescriptorType::eStorageImage, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
 			};
 
@@ -846,12 +925,28 @@ int main() {
 				.offset = 0,
 				.range = uniformBufferSize
 				};
+			auto vertexBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = vertexBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE
+			};
+
+			auto indexBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = indexBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE
+			};
+
+			std::cout << std::endl << vertexBuffer.memory;
 
 			std::vector<vk::WriteDescriptorSet>descriptorWrites = {
 				{.dstSet = rtDescriptorSet,.dstBinding = 0,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &renderTargetImageInfo},
 				{.pNext = &accelerationStructureInfo,
 				.dstSet = rtDescriptorSet,.dstBinding = 1,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eAccelerationStructureKHR },
-				{.dstSet = rtDescriptorSet,.dstBinding = 2,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo}
+				{.dstSet = rtDescriptorSet,.dstBinding = 2,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 3,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &vertexBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 4,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &indexBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 5,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
 				};
 
 				device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
@@ -1146,6 +1241,7 @@ int main() {
 		//uniformData.model = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 		//uniformData.model = glm::scale(uniformData.model, glm::vec3(0.01f, 0.01f, 0.01f));
 		uniformData.view = glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
+		uniformData.view = glm::scale(uniformData.view, glm::vec3(2, 2, 2));
 		uniformData.samples = sampleNumber;
 
 		//perspective

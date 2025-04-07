@@ -31,9 +31,4 @@
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
-  <ItemGroup>
-    <Object Include="Models\sphere.obj">
-      <Filter>Source Files</Filter>
-    </Object>
-  </ItemGroup>
 </Project>
