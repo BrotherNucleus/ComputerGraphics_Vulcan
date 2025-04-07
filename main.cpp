@@ -129,12 +129,27 @@ struct Vertex {
 	vec3 pos;
 };
 
+struct BufferMat {
+	float dx, dy, dz, ax, ay, az, s, sh;
+};
+
+struct Material {
+	vec3 diffuse;
+	vec3 ambient;
+	float specular;
+	float shininess;
+};
+
+
 layout(binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 3) buffer VertexBuffer {
     BufferVertex vertex_buffer[];
 };
 layout(set = 0, binding = 4) buffer IndexBuffer {
     int posI[];
+};
+layout(set = 0, binding = 6) buffer MaterialBuffer {
+    BufferMat matBuff;
 };
 layout(set = 0, binding = 5) uniform Camera {
 	 mat4 view;
@@ -151,6 +166,17 @@ vec3 fetchVertex( int index) {
 	return v; 
 }
 
+Material fetchMaterial() {
+	Material m;
+	vec3 dif = vec3(matBuff.dx, matBuff.dy, matBuff.dz);
+	vec3 am = vec3(matBuff.ax, matBuff.ay, matBuff.az);
+	m.diffuse = dif;
+	m.ambient = am;
+	m.specular = matBuff.s;
+	m.shininess = matBuff.sh;
+	return m;
+}
+
  void main()
  {
 	int primitiveID = gl_PrimitiveID;
@@ -162,27 +188,32 @@ vec3 fetchVertex( int index) {
 	v0 = gl_ObjectToWorldEXT * vec4(v0, 1);
 	v1 = gl_ObjectToWorldEXT * vec4(v1, 1);
 	v2 = gl_ObjectToWorldEXT * vec4(v2, 1);
-	
+
 	vec3 normal = normalize(cross(v0 - v1, v0 - v2));
 	
-	vec3 ambient = vec3(0.2, 0.2, 0.2);
+	Material mat = fetchMaterial();
+
+	vec3 ambient = mat.ambient;
 
 	DirectionalLight light;
 	light.direction = vec3(0.25f, 0.5f, 0.25f);
 	light.color = vec3(1.0f, 1.0f, 1.0f);
-	
 	vec3 lightDirection = normalize(-light.direction);
 	float lightIntensity = max(dot(normal, lightDirection), 0.0);
+
+
 	vec3 diffuse = light.color * lightIntensity;
-	vec3 surfaceColor = vec3(0.8, 0.6, 0.4);
+	vec3 surfaceColor = mat.diffuse;
+
+	float shininess = mat.shininess;
 
 	vec4 origin = inverse(cam.view) * vec4(0, 0, 0, 1);
 	vec3 o = vec3(origin.x, origin.y, origin.z);
 	vec3 hitPos = vec3(gl_WorldRayOriginEXT + gl_RayTmaxEXT * gl_WorldRayDirectionEXT);
-	float specularStrength = 0.5;
+	float specularStrength = mat.specular;
 	vec3 viewDir = normalize(o - hitPos);
-	vec3 reflectDir = reflect(-lightDirection, normal);
-	float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+	vec3 halfwayDir = normalize(lightDirection + viewDir);
+	float spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
 	vec3 specular = specularStrength * spec * light.color;
 
 	payload = surfaceColor * (diffuse + ambient + specular);
@@ -451,6 +482,21 @@ int main() {
 			return tempVulkanBuffer;
 		};
 
+	struct Material {
+		float diffuse[3];
+		float ambient[3];
+		float specular;
+		float shininess;
+	};
+	float materialSize = sizeof(float) * 8;
+
+	Material base = {
+		.diffuse = {0.8, 0.6, 0.4},
+		.ambient = {0.2, 0.2, 0.2},
+		.specular = 0.9,
+		.shininess = 64
+	};
+
 	//BLAS - Bottom Level Acceleration Structure (Verts/Tris)
 
 	struct Vertex {
@@ -508,10 +554,12 @@ int main() {
 	const vk::BufferUsageFlags usageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress;
 	const vk::BufferUsageFlags VusageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eVertexBuffer;
 	const vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal;
+	const vk::BufferUsageFlags matUsageFlags = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer;
 
 	VulkanBuffer vertexBuffer = createBuffer(vertices.size() * sizeof(Vertex), VusageFlags, memoryFlags, vertices.data());
 	VulkanBuffer indexBuffer = createBuffer(indeces.size() * sizeof(uint32_t), usageFlags, memoryFlags, indeces.data());
 	VulkanBuffer transformBuffer = createBuffer(sizeof(VkTransformMatrixKHR), usageFlags, memoryFlags, &transformMatrix);
+	VulkanBuffer materialBuffer = createBuffer(materialSize, matUsageFlags, memoryFlags, &base);
 
 	vk::DeviceOrHostAddressConstKHR vertexBufferDeviceAddress;
 	vertexBufferDeviceAddress.deviceAddress = vertexBuffer.address;	
@@ -850,7 +898,7 @@ int main() {
 	vk::DescriptorSetLayout rtDescriptorSetLayout;
 	VulkanBuffer uniformBuffer;
 
-	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer]()
+	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer, &materialBuffer]()
 		{
 			std::cout << "Lambda Called\n";
 			struct UniformData
@@ -888,6 +936,7 @@ int main() {
 				{.binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				{.binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				{.binding = 5, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 6, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				};
 
 			rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
@@ -899,6 +948,7 @@ int main() {
 				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 			};
 
 			vk::DescriptorPool rtDescriptorPool = device.createDescriptorPool(
@@ -937,7 +987,11 @@ int main() {
 				.range = VK_WHOLE_SIZE
 			};
 
-			std::cout << std::endl << vertexBuffer.memory;
+			auto materialBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = materialBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE,
+			};
 
 			std::vector<vk::WriteDescriptorSet>descriptorWrites = {
 				{.dstSet = rtDescriptorSet,.dstBinding = 0,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &renderTargetImageInfo},
@@ -947,6 +1001,7 @@ int main() {
 				{.dstSet = rtDescriptorSet,.dstBinding = 3,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &vertexBufferInfo},
 				{.dstSet = rtDescriptorSet,.dstBinding = 4,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &indexBufferInfo},
 				{.dstSet = rtDescriptorSet,.dstBinding = 5,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 6,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &materialBufferInfo},
 				};
 
 				device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
