@@ -134,7 +134,6 @@ struct stHitValue{
  };
 
  layout(location=0) rayPayloadInEXT stHitValue hitValue;
- layout(location=1) rayPayloadEXT vec3 payload;
 
  struct DirectionalLight {
 	vec3 direction;
@@ -248,8 +247,24 @@ DirectionalLight fetchLight() {
 	float spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
 	vec3 specular = specularStrength * spec * light.color;
 
-	payload = surfaceColor * (diffuse + ambient + specular);
-	hitValue.color = payload;
+	 uint rayFlags = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
+	float rayMin = 0.001;
+	float rayMax = 10000.0;
+	float shadowBias = 0.001;
+	uint cullMask = 0xFFu;
+	vec3 shadowRayOrigin = hitPos+shadowBias*normal;
+	vec3 shadowRayDirection=lightDirection;
+	hitValue.miss=false;
+	//shotshadowray
+	traceRayEXT(topLevelAS,rayFlags,cullMask,0u,0u,0u,shadowRayOrigin,rayMin,shadowRayDirection,rayMax,0);
+
+	float shadow=1.0;
+	 if(!hitValue.miss )
+	 {
+	 shadow=0.1;
+	 }
+
+	hitValue.color = surfaceColor * (diffuse + ambient + specular) * shadow;;
 	hitValue.miss = false;
  })";
 
@@ -370,19 +385,17 @@ int main() {
 	};
 
 	vk::PhysicalDevice physicalDevice = nullptr;
-
 	for (const vk::PhysicalDevice& d : physicalDevices) {
 		std::vector<vk::ExtensionProperties> availableExtensions = d.enumerateDeviceExtensionProperties();
 		std::set<std::string> requiredExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
-
-		for (const vk::ExtensionProperties& extention : availableExtensions)
-		{
-			requiredExtensions.erase(extention.extensionName);
-		}
-		if (requiredExtensions.empty()) {
-			physicalDevice = d;
-			break;
-		}
+			for (const vk::ExtensionProperties& extention : availableExtensions)
+			{
+				requiredExtensions.erase(extention.extensionName);
+			}
+			if (requiredExtensions.empty()) {
+				physicalDevice = d;
+				break;
+			}
 	}
 
 	std::cout << "Selecteddevice:" << getDeviceProperties(physicalDevice).deviceName << std::endl;
