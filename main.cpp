@@ -57,7 +57,31 @@ const std::string raygenShaderCode = R"(
 	 int samples;
  }cam;
 
- layout(location=0) rayPayloadEXT vec3 hitValue;
+struct stHitValue {
+ vec3 color;
+ bool miss;
+ };
+
+ layout(location=0) rayPayloadEXT stHitValue hitValue;
+
+vec3 traceRay(vec2 d) {
+
+ vec4 origin = inverse(cam.view) * vec4(0,0,0,1);
+ vec4 target = inverse(cam.proj) * vec4(d.x, d.y, 1, 1) ;
+ vec4 direction = inverse(cam.view)*vec4(normalize(target.xyz), 0) ;
+
+//ortho
+
+//vec4 origin = inverse(cam.view) * inverse(cam.proj) * vec4(d.x, d.y, 0, 1);
+//vec4 direction = inverse(cam.view) * vec4(0, 0, -1, 0);
+
+ float tmin = 0.001;
+ float tmax = 10000.0;
+ hitValue.color = vec3(0.0);
+ hitValue.miss = false;
+ traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,origin.xyz,tmin,direction.xyz,tmax,0);
+ return hitValue.color;
+}
 
 void main()
 {
@@ -73,25 +97,9 @@ for (int i = 1; i <= cam.samples; i++)
 			 const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
 			 vec2 d = inUV*2.0-1.0;
 
-			//perspective
-
-			 vec4 origin = inverse(cam.view) * vec4(0,0,0,1);
-			 vec4 target = inverse(cam.proj)*vec4(d.x,d.y,1,1);
-			 vec4 direction = inverse(cam.view) * vec4(normalize(target.xyz),0);
-
-			//ortho
-
-			 //vec4 origin = inverse(cam.view) * inverse(cam.proj) * vec4(d.x, d.y, 0, 1);
-			 //vec4 direction = inverse(cam.view) * vec4(0, 0, -1, 0);
-
-			 float tmin=0.001;
-			 float tmax=10000.0;
-
-			 hitValue=vec3(0.0);
-
-			 traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,origin.xyz,tmin,direction.xyz,tmax, 0);
+			 vec3 color = traceRay(d);
 	
-			finalColor += hitValue;
+			finalColor += color;
 		}
 	}
 finalColor /= (cam.samples*cam.samples);
@@ -102,10 +110,17 @@ finalColor /= (cam.samples*cam.samples);
 const std::string missShaderCode = R"(
  #version 460
  #extension GL_EXT_ray_tracing : enable
- layout(location=0) rayPayloadInEXT vec3 hitValue;
+
+struct stHitValue{
+ vec3 color;
+ bool miss;
+ };
+
+ layout(location=0) rayPayloadInEXT stHitValue hitValue;
  void main()
  {
-	hitValue = vec3(0.0, 0.0, 0.2);
+	hitValue.color = vec3(0.0, 0.0, 0.2);
+	hitValue.miss = true;
  })";
 
 const std::string closestHitShaderCode = R"(
@@ -113,7 +128,12 @@ const std::string closestHitShaderCode = R"(
  #extension GL_EXT_ray_tracing : enable
  #extension GL_EXT_nonuniform_qualifier : enable
 
- layout(location=0) rayPayloadInEXT vec3 hitColor;
+struct stHitValue{
+ vec3 color;
+ bool miss;
+ };
+
+ layout(location=0) rayPayloadInEXT stHitValue hitValue;
  layout(location=1) rayPayloadEXT vec3 payload;
 
  struct DirectionalLight {
@@ -140,6 +160,9 @@ struct Material {
 	float shininess;
 };
 
+struct lightBuffer {
+	float dx, dy, dz, cx, cy, cz;
+};
 
 layout(binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 3) buffer VertexBuffer {
@@ -156,6 +179,10 @@ layout(set = 0, binding = 5) uniform Camera {
 	 mat4 proj;
 	 int samples;
 }cam;
+
+layout(set = 0, binding = 7) buffer Light {
+	lightBuffer lightBuf;
+};
 hitAttributeEXT vec2 attribs;
 
 vec3 fetchVertex( int index) {
@@ -177,6 +204,13 @@ Material fetchMaterial() {
 	return m;
 }
 
+DirectionalLight fetchLight() {
+	DirectionalLight l;
+	l.direction = vec3(lightBuf.dx, lightBuf.dy, lightBuf.dz);
+	l.color = vec3(lightBuf.cx, lightBuf.cy, lightBuf.cz);
+	return l;
+}
+
  void main()
  {
 	int primitiveID = gl_PrimitiveID;
@@ -195,9 +229,7 @@ Material fetchMaterial() {
 
 	vec3 ambient = mat.ambient;
 
-	DirectionalLight light;
-	light.direction = vec3(0.25f, 0.5f, 0.25f);
-	light.color = vec3(1.0f, 1.0f, 1.0f);
+	DirectionalLight light = fetchLight();
 	vec3 lightDirection = normalize(-light.direction);
 	float lightIntensity = max(dot(normal, lightDirection), 0.0);
 
@@ -217,9 +249,8 @@ Material fetchMaterial() {
 	vec3 specular = specularStrength * spec * light.color;
 
 	payload = surfaceColor * (diffuse + ambient + specular);
-	//payload = vec3((v0.x + v1.x + v2.x)/3, (v0.y + v1.y + v2.y)/3, (v0.z + v1.z + v2.z)/3);
-	//payload = v0;
-	hitColor = payload;
+	hitValue.color = payload;
+	hitValue.miss = false;
  })";
 
 int sampleNumber = 1;
@@ -482,6 +513,16 @@ int main() {
 			return tempVulkanBuffer;
 		};
 
+	struct DirectionalLight {
+		float direction[3];
+		float color[3];
+	};
+
+	DirectionalLight light = {
+		.direction = {0.25f, 0.5f, 0.25f},
+		.color = {1.0f, 1.0f, 1.0f}
+	};
+
 	struct Material {
 		float diffuse[3];
 		float ambient[3];
@@ -560,6 +601,7 @@ int main() {
 	VulkanBuffer indexBuffer = createBuffer(indeces.size() * sizeof(uint32_t), usageFlags, memoryFlags, indeces.data());
 	VulkanBuffer transformBuffer = createBuffer(sizeof(VkTransformMatrixKHR), usageFlags, memoryFlags, &transformMatrix);
 	VulkanBuffer materialBuffer = createBuffer(materialSize, matUsageFlags, memoryFlags, &base);
+	VulkanBuffer lightBuffer = createBuffer(sizeof(float)*6, matUsageFlags, memoryFlags, &light);
 
 	vk::DeviceOrHostAddressConstKHR vertexBufferDeviceAddress;
 	vertexBufferDeviceAddress.deviceAddress = vertexBuffer.address;	
@@ -707,7 +749,7 @@ int main() {
 	vk::TransformMatrixKHR vktransformMatrix;
 	memcpy(&vktransformMatrix.matrix, &transformMatrix.matrix, sizeof(transformMatrix));
 
-	vktransformMatrix.matrix[0][3] = -2.0f;
+	vktransformMatrix.matrix[0][3] = -1.5f;
 	auto accelerationStructureInstance = vk::AccelerationStructureInstanceKHR{
 		.transform = vktransformMatrix,
 		.instanceCustomIndex = 0,
@@ -721,7 +763,7 @@ int main() {
 		.accelerationStructure =bottomAccelerationStructure.accelerationStructure}, dynamicDispatchLoader);
 
 	VkTransformMatrixKHR vktransformMatrix2 = vktransformMatrix;
-	vktransformMatrix2.matrix[0][3] = 2.0f;
+	vktransformMatrix2.matrix[0][3] = 1.5f;
 
 	auto accelerationStructureInstance2 = accelerationStructureInstance;
 	accelerationStructureInstance2.transform = vktransformMatrix2;
@@ -898,7 +940,7 @@ int main() {
 	vk::DescriptorSetLayout rtDescriptorSetLayout;
 	VulkanBuffer uniformBuffer;
 
-	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer, &materialBuffer]()
+	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer, &materialBuffer, &lightBuffer]()
 		{
 			std::cout << "Lambda Called\n";
 			struct UniformData
@@ -937,6 +979,7 @@ int main() {
 				{.binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				{.binding = 5, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				{.binding = 6, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 7, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				};
 
 			rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
@@ -948,6 +991,7 @@ int main() {
 				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 			};
 
@@ -993,6 +1037,12 @@ int main() {
 				.range = VK_WHOLE_SIZE,
 			};
 
+			auto lightBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = lightBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE
+			};
+
 			std::vector<vk::WriteDescriptorSet>descriptorWrites = {
 				{.dstSet = rtDescriptorSet,.dstBinding = 0,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &renderTargetImageInfo},
 				{.pNext = &accelerationStructureInfo,
@@ -1002,6 +1052,7 @@ int main() {
 				{.dstSet = rtDescriptorSet,.dstBinding = 4,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &indexBufferInfo},
 				{.dstSet = rtDescriptorSet,.dstBinding = 5,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
 				{.dstSet = rtDescriptorSet,.dstBinding = 6,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &materialBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 7,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &lightBufferInfo}
 				};
 
 				device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
@@ -1290,11 +1341,7 @@ int main() {
 		glm::mat4 ident(1.0f);
 		glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
-		//glm::vec3 camZ = glm::vec3(0.0, 0.0, 5.0f);
 		UniformData uniformData{};
-		//uniformData.model = glm::translate(uniformData.model, glm::vec3(0.0, 0.0, dist));
-		//uniformData.model = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
-		//uniformData.model = glm::scale(uniformData.model, glm::vec3(0.01f, 0.01f, 0.01f));
 		uniformData.view = glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
 		uniformData.view = glm::scale(uniformData.view, glm::vec3(2, 2, 2));
 		uniformData.samples = sampleNumber;
@@ -1305,8 +1352,6 @@ int main() {
 		//ortho
 		/*float aspectRatio = (float)settings.windowWidth / (float)settings.windowHeight;
 		uniformData.proj = glm::ortho(-2.0f * aspectRatio, 2.0f * aspectRatio, -2.0f, 2.0f, 0.1f, 1000.0f);*/
-
-		//uniformData.projInverse = glm::inverse(glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f));
 		updateUniformBuffer(uniformData);
 
 		glfwPollEvents();
