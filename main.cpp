@@ -16,6 +16,7 @@
 #include <GLFW/glfw3.h>
 #pragma comment(lib, "glfw3.lib")
 
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <fstream>
@@ -43,230 +44,6 @@
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
-
-const std::string raygenShaderCode = R"(
- #version 460
- #extension GL_EXT_ray_tracing : enable
-
- layout(binding=0,set=0,rgba8) uniform image2D image;
- layout(binding=1,set=0) uniform accelerationStructureEXT topLevelAS;
- layout(binding=2,set=0) uniform CameraProperties
- {
-	 mat4 view;
-	 mat4 proj;
-	 int samples;
- }cam;
-
-struct stHitValue {
- vec3 color;
- bool miss;
- };
-
- layout(location=0) rayPayloadEXT stHitValue hitValue;
-
-vec3 traceRay(vec2 d) {
-
- vec4 origin = inverse(cam.view) * vec4(0,0,0,1);
- vec4 target = inverse(cam.proj) * vec4(d.x, d.y, 1, 1) ;
- vec4 direction = inverse(cam.view)*vec4(normalize(target.xyz), 0) ;
-
-//ortho
-
-//vec4 origin = inverse(cam.view) * inverse(cam.proj) * vec4(d.x, d.y, 0, 1);
-//vec4 direction = inverse(cam.view) * vec4(0, 0, -1, 0);
-
- float tmin = 0.001;
- float tmax = 10000.0;
- hitValue.color = vec3(0.0);
- hitValue.miss = false;
- traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,origin.xyz,tmin,direction.xyz,tmax,0);
- return hitValue.color;
-}
-
-void main()
-{
-vec3 finalColor = vec3(0.0);
-
-float jitter = 0.5 / cam.samples;
-
-for (int i = 1; i <= cam.samples; i++) 
-	{
-		for (int j = 1; j <= cam.samples; j++)  
-		{
-			 const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy)+vec2(i * jitter, j * jitter);
-			 const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
-			 vec2 d = inUV*2.0-1.0;
-
-			 vec3 color = traceRay(d);
-	
-			finalColor += color;
-		}
-	}
-finalColor /= (cam.samples*cam.samples);
-
- imageStore(image,ivec2(gl_LaunchIDEXT.xy),vec4(finalColor,0.0));
- })";
-
-const std::string missShaderCode = R"(
- #version 460
- #extension GL_EXT_ray_tracing : enable
-
-struct stHitValue{
- vec3 color;
- bool miss;
- };
-
- layout(location=0) rayPayloadInEXT stHitValue hitValue;
- void main()
- {
-	hitValue.color = vec3(0.0, 0.0, 0.2);
-	hitValue.miss = true;
- })";
-
-const std::string closestHitShaderCode = R"(
- #version 460
- #extension GL_EXT_ray_tracing : enable
- #extension GL_EXT_nonuniform_qualifier : enable
-
-struct stHitValue{
- vec3 color;
- bool miss;
- };
-
- layout(location=0) rayPayloadInEXT stHitValue hitValue;
-
- struct DirectionalLight {
-	vec3 direction;
-	vec3 color;
-};
-
-struct BufferVertex {
-	float x, y, z;
-	};
-
-struct Vertex {
-	vec3 pos;
-};
-
-struct BufferMat {
-	float dx, dy, dz, ax, ay, az, s, sh;
-};
-
-struct Material {
-	vec3 diffuse;
-	vec3 ambient;
-	float specular;
-	float shininess;
-};
-
-struct lightBuffer {
-	float dx, dy, dz, cx, cy, cz;
-};
-
-layout(binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(set = 0, binding = 3) buffer VertexBuffer {
-    BufferVertex vertex_buffer[];
-};
-layout(set = 0, binding = 4) buffer IndexBuffer {
-    int posI[];
-};
-layout(set = 0, binding = 6) buffer MaterialBuffer {
-    BufferMat matBuff;
-};
-layout(set = 0, binding = 5) uniform Camera {
-	 mat4 view;
-	 mat4 proj;
-	 int samples;
-}cam;
-
-layout(set = 0, binding = 7) buffer Light {
-	lightBuffer lightBuf;
-};
-hitAttributeEXT vec2 attribs;
-
-vec3 fetchVertex( int index) {
-	int i = posI[index];
-	BufferVertex bv = vertex_buffer[i];
-	vec3 v;
-	v = vec3(bv.x ,bv.y, bv.z);
-	return v; 
-}
-
-Material fetchMaterial() {
-	Material m;
-	vec3 dif = vec3(matBuff.dx, matBuff.dy, matBuff.dz);
-	vec3 am = vec3(matBuff.ax, matBuff.ay, matBuff.az);
-	m.diffuse = dif;
-	m.ambient = am;
-	m.specular = matBuff.s;
-	m.shininess = matBuff.sh;
-	return m;
-}
-
-DirectionalLight fetchLight() {
-	DirectionalLight l;
-	l.direction = vec3(lightBuf.dx, lightBuf.dy, lightBuf.dz);
-	l.color = vec3(lightBuf.cx, lightBuf.cy, lightBuf.cz);
-	return l;
-}
-
- void main()
- {
-	int primitiveID = gl_PrimitiveID;
-
-	vec3 v0 = fetchVertex(primitiveID*3 + 0);
-	vec3 v1 = fetchVertex(primitiveID*3 + 1);
-	vec3 v2 = fetchVertex(primitiveID*3 + 2);
-
-	v0 = gl_ObjectToWorldEXT * vec4(v0, 1);
-	v1 = gl_ObjectToWorldEXT * vec4(v1, 1);
-	v2 = gl_ObjectToWorldEXT * vec4(v2, 1);
-
-	vec3 normal = normalize(cross(v0 - v1, v0 - v2));
-	
-	Material mat = fetchMaterial();
-
-	vec3 ambient = mat.ambient;
-
-	DirectionalLight light = fetchLight();
-	vec3 lightDirection = normalize(-light.direction);
-	float lightIntensity = max(dot(normal, lightDirection), 0.0);
-
-
-	vec3 diffuse = light.color * lightIntensity;
-	vec3 surfaceColor = mat.diffuse;
-
-	float shininess = mat.shininess;
-
-	vec4 origin = inverse(cam.view) * vec4(0, 0, 0, 1);
-	vec3 o = vec3(origin.x, origin.y, origin.z);
-	vec3 hitPos = vec3(gl_WorldRayOriginEXT + gl_RayTmaxEXT * gl_WorldRayDirectionEXT);
-	float specularStrength = mat.specular;
-	vec3 viewDir = normalize(o - hitPos);
-	vec3 halfwayDir = normalize(lightDirection + viewDir);
-	float spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
-	vec3 specular = specularStrength * spec * light.color;
-
-	 uint rayFlags = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
-	float rayMin = 0.001;
-	float rayMax = 10000.0;
-	float shadowBias = 0.001;
-	uint cullMask = 0xFFu;
-	vec3 shadowRayOrigin = hitPos+shadowBias*normal;
-	vec3 shadowRayDirection=lightDirection;
-	hitValue.miss=false;
-	//shotshadowray
-	traceRayEXT(topLevelAS,rayFlags,cullMask,0u,0u,0u,shadowRayOrigin,rayMin,shadowRayDirection,rayMax,0);
-
-	float shadow=1.0;
-	 if(!hitValue.miss )
-	 {
-	 shadow=0.1;
-	 }
-
-	hitValue.color = surfaceColor * (diffuse + ambient + specular) * shadow;;
-	hitValue.miss = false;
- })";
 
 int sampleNumber = 1;
 
@@ -1093,8 +870,16 @@ int main() {
 		return device.createShaderModule(shaderModuleCreateInfo);
 		};
 
-	auto createShaderModuleFromGLSL = [&device](const std::string& glslSourceCode, shaderc_shader_kind shaderKind)
+	auto createShaderModuleFromGLSL = [&device](const std::string& path, shaderc_shader_kind shaderKind)
 			{
+			std::string glslSourceCode;
+			std::ifstream file(path);
+			if (!file.is_open()) {
+				std::cerr << "Failed to open file: " << path << std::endl;
+				DBG_ASSERT(0);
+			}
+			std::getline(file, glslSourceCode, '\0');
+			file.close();
 				const char* shaderSource = glslSourceCode.c_str();
 				//Create a shaderc compiler instance
 				shaderc::Compiler compiler;
@@ -1121,9 +906,12 @@ int main() {
 			};
 
 	//Create shader modules from inline
-	vk::ShaderModule raygenModule = createShaderModuleFromGLSL(raygenShaderCode, shaderc_shader_kind::shaderc_raygen_shader);
-	vk::ShaderModule  chitModule = createShaderModuleFromGLSL(closestHitShaderCode, shaderc_shader_kind::shaderc_closesthit_shader);
-	vk::ShaderModule missModule = createShaderModuleFromGLSL(missShaderCode, shaderc_shader_kind::shaderc_miss_shader);
+	//vk::ShaderModule raygenModule = createShaderModuleFromGLSL(raygenShaderCode, shaderc_shader_kind::shaderc_raygen_shader);
+	//vk::ShaderModule  chitModule = createShaderModuleFromGLSL(closestHitShaderCode, shaderc_shader_kind::shaderc_closesthit_shader);
+	//vk::ShaderModule missModule = createShaderModuleFromGLSL(missShaderCode, shaderc_shader_kind::shaderc_miss_shader);
+	vk::ShaderModule raygenModule = createShaderModuleFromGLSL("shaders/shader.rgen", shaderc_shader_kind::shaderc_raygen_shader);
+	vk::ShaderModule chitModule = createShaderModuleFromGLSL("shaders/shader.chit", shaderc_shader_kind::shaderc_closesthit_shader);
+	vk::ShaderModule missModule = createShaderModuleFromGLSL("shaders/shader.rmiss", shaderc_shader_kind::shaderc_miss_shader);
 
 	std::vector<vk::PipelineShaderStageCreateInfo>stages = {
 		{.stage = vk::ShaderStageFlagBits::eRaygenKHR, .module = raygenModule,.pName = "main"},
