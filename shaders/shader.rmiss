@@ -1,9 +1,13 @@
 #version 460
 #extension GL_EXT_ray_tracing : enable
 
-struct stHitValue{
+struct stHitValue {
 	vec3 color;
 	bool miss;
+	int depth;
+	vec3 origin;
+	vec3 direction;
+	float contribution;
 };
 
 layout(location=0) rayPayloadInEXT stHitValue hitValue;
