@@ -14,7 +14,7 @@ struct stHitValue {
 layout(location=0) rayPayloadInEXT stHitValue hitValue;
 
 struct DirectionalLight {
-	vec3 direction;
+	vec3 position;
 	vec3 color;
 };
 
@@ -98,7 +98,7 @@ Material fetchMaterial(int customIndex) {
 
 DirectionalLight fetchLight() {
  	DirectionalLight l;
- 	l.direction = vec3(lightBuf.dx, lightBuf.dy, lightBuf.dz);
+ 	l.position = vec3(lightBuf.dx, lightBuf.dy, lightBuf.dz);
  	l.color = vec3(lightBuf.cx, lightBuf.cy, lightBuf.cz);
  	return l;
  }
@@ -128,8 +128,10 @@ void main()
 
 	vec3 ambient = mat.ambient;
 
+	vec3 hitPos = vec3(gl_WorldRayOriginEXT + gl_RayTmaxEXT * gl_WorldRayDirectionEXT);
+
 	DirectionalLight light = fetchLight();
-	vec3 lightDirection = normalize(-light.direction);
+	vec3 lightDirection = normalize(-hitPos-light.position);
 	float lightIntensity = max(dot(normal, lightDirection), 0.0);
 
 
@@ -140,7 +142,6 @@ void main()
 
 	vec4 origin = inverse(cam.view) * vec4(0, 0, 0, 1);
 	vec3 o = vec3(origin.x, origin.y, origin.z);
-	vec3 hitPos = vec3(gl_WorldRayOriginEXT + gl_RayTmaxEXT * gl_WorldRayDirectionEXT);
 	float specularStrength = mat.specular;
 	vec3 viewDir = normalize(o - hitPos);
 	vec3 halfwayDir = normalize(lightDirection + viewDir);
@@ -167,7 +168,7 @@ void main()
 		}
 
 	hitValue.color = surfaceColor * (diffuse + ambient + specular);
-	//hitValue.color = vec3(iOff[0]*.05, .5, .5);
+	//hitValue.color = v1.pos;
 	hitValue.origin = hitPos;
 	hitValue.direction = reflect(gl_WorldRayDirectionEXT, normal);
 }

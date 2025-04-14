@@ -546,18 +546,40 @@ int main() {
 	};
 
 	DirectionalLight light = {
-		.direction = {0.f, 0.f, 1.f},
+		.direction = {0.f, -1.1f, 0.f},
 		.color = {1.0f, 1.0f, 1.0f}
 	};
 
 	Material base = {
-		.diffuse = {0.8, 0.6, 0.4},
+		.diffuse = {0.5, 0.5, 0.5},
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 0.5,
-		.shininess = 64
+		.shininess = 16
 	};
+
+	Material wallLeft = {
+		.diffuse = {0.0, 0.8, 0.0},
+		.ambient = {0.2, 0.2, 0.2},
+		.specular = 1.0,
+		.shininess = 16
+	};
+
+	Material wallRight = {
+		.diffuse = {0.8, 0.0, 0.0},
+		.ambient = {0.2, 0.2, 0.2},
+		.specular = 1.0,
+		.shininess = 16
+	};
+
 	Material sphereMat = {
 		.diffuse = {0.8, 0.1, 0.1},
+		.ambient = {0.2, 0.2, 0.2},
+		.specular = 1.0,
+		.shininess = 16
+	};
+
+	Material sphereMat2 = {
+		.diffuse = {0.1, 0.8, 0.1},
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 1.0,
 		.shininess = 16
@@ -568,10 +590,14 @@ int main() {
 	Model box = createModel(filename);
 	box.material = base;
 
-	uint32_t vertexCount = static_cast<uint32_t>(box.vertices.size());
-	std::cout << vertexCount << std::endl;
-	uint32_t indexCount = static_cast<uint32_t>(box.indices.size());
-	const uint32_t numTriangles = indexCount / 3;
+	Model wallLeftModel = createModel("Models/wall_L.obj");
+	wallLeftModel.material = wallLeft;
+
+	Model wallRightModel = createModel("Models/wall_R.obj");
+	wallRightModel.material = wallRight;
+
+	Model sphere2 = createModel("Models/sphere2.obj");
+	sphere2.material = sphereMat2;
 
 	const VkTransformMatrixKHR transformMatrix = {
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -590,21 +616,19 @@ int main() {
 
 	VulkanAccelerationStructure sphereBLAS = createBLAS(sphere.vertices, sphere.indices, transformMatrix, device, physicalDevice, commandPool, computePresentQueue, dynamicDispatchLoader);
 
+	VulkanAccelerationStructure wallLeftBLAS = createBLAS(wallLeftModel.vertices, wallLeftModel.indices, transformMatrix, device, physicalDevice, commandPool, computePresentQueue, dynamicDispatchLoader);
+	VulkanAccelerationStructure wallRightBLAS = createBLAS(wallRightModel.vertices, wallRightModel.indices, transformMatrix, device, physicalDevice, commandPool, computePresentQueue, dynamicDispatchLoader);
+	VulkanAccelerationStructure sphere2BLAS = createBLAS(sphere2.vertices, sphere2.indices, transformMatrix, device, physicalDevice, commandPool, computePresentQueue, dynamicDispatchLoader);
+
 	const vk::BufferUsageFlags usageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress;
 	const vk::BufferUsageFlags VusageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eVertexBuffer;
 	const vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal;
 	const vk::BufferUsageFlags matUsageFlags = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer;
 
-	VulkanBuffer vertexBufferB = createBuffer(box.vertices.size() * sizeof(Vertex), VusageFlags, memoryFlags, box.vertices.data());
-	VulkanBuffer vertexBufferS = createBuffer(sphere.vertices.size() * sizeof(Vertex), VusageFlags, memoryFlags, sphere.vertices.data());
-	VulkanBuffer indexBufferB = createBuffer(box.indices.size() * sizeof(uint32_t), usageFlags, memoryFlags, box.indices.data());
-	VulkanBuffer indexBufferS = createBuffer(sphere.indices.size() * sizeof(uint32_t), usageFlags, memoryFlags, sphere.indices.data());
 	VulkanBuffer transformBuffer = createBuffer(sizeof(VkTransformMatrixKHR), usageFlags, memoryFlags, &transformMatrix);
-	VulkanBuffer materialBufferB = createBuffer(materialSize, matUsageFlags, memoryFlags, &base);
-	VulkanBuffer materialBufferS = createBuffer(materialSize, matUsageFlags, memoryFlags, &sphereMat);
 	VulkanBuffer lightBuffer = createBuffer(sizeof(float) * 6, matUsageFlags, memoryFlags, &light);
 
-	std::vector<Model> models = { box, sphere };
+	std::vector<Model> models = { box, sphere, wallLeftModel, wallRightModel, sphere2};
 
 	std::vector<Vertex> vertices;
 	std::vector<uint32_t> indices;
@@ -615,17 +639,28 @@ int main() {
 		materials.push_back(model.material);
 	}
 
-	VulkanBuffer vertexBuffer = createBuffer((box.vertices.size() + sphere.vertices.size()) * sizeof(Vertex), VusageFlags, memoryFlags, vertices.data());
-	VulkanBuffer indexBuffer = createBuffer((box.indices.size() + sphere.indices.size()) * sizeof(uint32_t), usageFlags, memoryFlags, indices.data());
-	VulkanBuffer materialBuffer = createBuffer(materials.size() * materialSize, matUsageFlags, memoryFlags, materials.data());
+	int vertexCount = 0;
+	int indexCount = 0;
+	int materialCount = 0;
+	for (const auto& model : models) {
+		vertexCount += model.vertices.size();
+		indexCount += model.indices.size();
+		materialCount++;
+	}
 
-	std::vector<VulkanBuffer> vertexBuffers = { vertexBufferB, vertexBufferS };
-	std::vector<VulkanBuffer> indexBuffers = { indexBufferB, indexBufferS };
-	std::vector<VulkanBuffer> materialBuffers = { materialBufferB, materialBufferS };
+	VulkanBuffer vertexBuffer = createBuffer(vertexCount * sizeof(Vertex), VusageFlags, memoryFlags, vertices.data());
+	VulkanBuffer indexBuffer = createBuffer(indexCount * sizeof(uint32_t), usageFlags, memoryFlags, indices.data());
+	VulkanBuffer materialBuffer = createBuffer(materialCount * materialSize, matUsageFlags, memoryFlags, materials.data());
 
-	std::vector<int> vertexOffsets = {0, int(box.vertices.size())};
-	std::vector<int> indexOffsets = { 0, int(box.indices.size())};
-	std::vector<int> materialOffsets = { 0, 1 };
+	std::vector<int> vertexOffsets = {0, int(box.vertices.size()), 
+		int(box.vertices.size()) + int(sphere.vertices.size()), 
+		int(box.vertices.size()) + int(sphere.vertices.size()) + int(wallLeftModel.vertices.size()), 
+		int(box.vertices.size()) + int(sphere.vertices.size()) + int(wallLeftModel.vertices.size()) + int(wallRightModel.vertices.size())};
+	std::vector<int> indexOffsets = { 0, int(box.indices.size()), 
+		int(box.indices.size()) + int(sphere.indices.size()), 
+		int(box.indices.size()) + int(sphere.indices.size()) + int(wallLeftModel.indices.size()), 
+		int(box.indices.size()) + int(sphere.indices.size()) + int(wallLeftModel.indices.size()) + int(wallRightModel.indices.size())};
+	std::vector<int> materialOffsets = { 0, 1, 2, 3, 4};
 
 	VulkanBuffer vertexOffsetBuffer = createBuffer(vertexOffsets.size() * sizeof(int), usageFlags, memoryFlags, vertexOffsets.data());
 	VulkanBuffer indexOffsetBuffer = createBuffer(indexOffsets.size() * sizeof(int), usageFlags, memoryFlags, indexOffsets.data());
@@ -652,6 +687,9 @@ int main() {
 
 	vk::AccelerationStructureInstanceKHR boxInstance = createAccelerationStructureInstance(blas, transformMatrix, 0);
 	vk::AccelerationStructureInstanceKHR sphereInstance = createAccelerationStructureInstance(sphereBLAS, transformMatrix, 1);
+	vk::AccelerationStructureInstanceKHR wallLeftInstance = createAccelerationStructureInstance(wallLeftBLAS, transformMatrix, 2);
+	vk::AccelerationStructureInstanceKHR wallRightInstance = createAccelerationStructureInstance(wallRightBLAS, transformMatrix, 3);
+	vk::AccelerationStructureInstanceKHR sphere2Instance = createAccelerationStructureInstance(sphere2BLAS, transformMatrix, 4);
 
 	//TLAS
 
@@ -675,7 +713,7 @@ int main() {
 		.scratchData = {}
 		};
 
-	auto buildSizesInfoTLAS = device.getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfoTLAS, { 2 }, dynamicDispatchLoader);
+	auto buildSizesInfoTLAS = device.getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfoTLAS, { (uint32_t)models.size()}, dynamicDispatchLoader);
 
 	VulkanAccelerationStructure topAccelerationStructure;
 
@@ -698,7 +736,7 @@ int main() {
 
 	topAccelerationStructure.accelerationStructure = device.createAccelerationStructureKHR(createInfoTLAS, nullptr, dynamicDispatchLoader);
 
-	std::vector<vk::AccelerationStructureInstanceKHR> instances = { boxInstance, sphereInstance};
+	std::vector<vk::AccelerationStructureInstanceKHR> instances = { boxInstance, sphereInstance, wallLeftInstance, wallRightInstance, sphere2Instance};
 
 	topAccelerationStructure.instancesBuffer = createBuffer(instances.size() * sizeof(vk::AccelerationStructureInstanceKHR),
 		vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
@@ -721,7 +759,7 @@ int main() {
 		});
 	//Buildtheaccelerationstructure
 	auto buildRangeInfoTLAS = vk::AccelerationStructureBuildRangeInfoKHR{
-		.primitiveCount = 2,
+		.primitiveCount = (uint32_t)models.size(),
 		.primitiveOffset = 0,
 		.firstVertex = 0,
 		.transformOffset = 0
@@ -757,7 +795,7 @@ int main() {
 	struct {
 		uint32_t windowWidth;
 		uint32_t windowHeight;
-	} settings{ .windowWidth = 640, .windowHeight = 480 };
+	} settings{ .windowWidth = 480, .windowHeight = 480 };
 
 	auto createImageView = [&device](const vk::Image& image, const vk::Format& format) {
 		return device.createImageView(
@@ -1302,13 +1340,14 @@ int main() {
 					device.unmapMemory(uniformBuffer.memory);
 				};
 		float dist = 10.0f;
-		yAngle += 0.02f;
+		yAngle += 0.00f;
 		glm::mat4 ident(1.0f);
 		glm::mat4 rotY = glm::rotate(ident, yAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::vec3 camZ = glm::vec3(rotY[0][0] * dist, rotY[0][1] * dist, rotY[0][2] * dist);
 		UniformData uniformData{};
 		uniformData.view = glm::lookAt(camZ, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
-		uniformData.view = glm::scale(uniformData.view, glm::vec3(2, 2, 2));
+		uniformData.view = glm::scale(uniformData.view, glm::vec3(2.5, 2.5, 2.5));
+		uniformData.view = glm::rotate(uniformData.view, glm::radians(180.f), glm::vec3(0.0f, 0.0f, 1.0f));
 		uniformData.samples = sampleNumber;
 
 		//perspective
