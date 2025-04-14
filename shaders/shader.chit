@@ -50,7 +50,7 @@ layout(set = 0, binding = 4) buffer IndexBuffer {
 	int posI[];
 };
 layout(set = 0, binding = 6) buffer MaterialBuffer {
-	BufferMat matBuff;
+	BufferMat matBuff[];
 };
 layout(set = 0, binding = 5) uniform Camera {
 	mat4 view;
@@ -62,25 +62,37 @@ layout(set = 0, binding = 7) buffer Light {
 	lightBuffer lightBuf;
 };
 
+layout(set = 0, binding = 8) buffer vOffset {
+	int vOff[];
+};
+
+layout(set = 0, binding = 9) buffer iOffset {
+	int iOff[];
+};
+
+layout(set = 0, binding = 10) buffer mOffset {
+	int mOff[];
+};
+
 hitAttributeEXT vec2 attribs;
 
-Vertex fetchVertex( int index) {
- 	int i = posI[index];
- 	BufferVertex bv = vertex_buffer[i];
+Vertex fetchVertex( int index, int customIndex) {
+ 	int i = posI[iOff[customIndex] + index];
+ 	BufferVertex bv = vertex_buffer[vOff[customIndex] + i];
  	Vertex v;
  	v.pos = vec3(bv.x ,bv.y, bv.z);
 	v.normal = vec3(bv.nx, bv.ny, bv.nz);
  	return v; 
  }
 
-Material fetchMaterial() {
+Material fetchMaterial(int customIndex) {
  	Material m;
- 	vec3 dif = vec3(matBuff.dx, matBuff.dy, matBuff.dz);
- 	vec3 am = vec3(matBuff.ax, matBuff.ay, matBuff.az);
+ 	vec3 dif = vec3(matBuff[mOff[customIndex]].dx, matBuff[mOff[customIndex]].dy, matBuff[mOff[customIndex]].dz);
+ 	vec3 am = vec3(matBuff[mOff[customIndex]].ax, matBuff[mOff[customIndex]].ay, matBuff[mOff[customIndex]].az);
  	m.diffuse = dif;
  	m.ambient = am;
- 	m.specular = matBuff.s;
- 	m.shininess = matBuff.sh;
+ 	m.specular = matBuff[mOff[customIndex]].s;
+ 	m.shininess = matBuff[mOff[customIndex]].sh;
  	return m;
  }
 
@@ -94,10 +106,11 @@ DirectionalLight fetchLight() {
 void main()
 {
 	int primitiveID = gl_PrimitiveID;
+	int cIndex = gl_InstanceCustomIndexEXT;
 
-	Vertex v0 = fetchVertex(primitiveID*3 + 0);
-	Vertex v1 = fetchVertex(primitiveID*3 + 1);
-	Vertex v2 = fetchVertex(primitiveID*3 + 2);
+	Vertex v0 = fetchVertex(primitiveID*3 + 0, cIndex);
+	Vertex v1 = fetchVertex(primitiveID*3 + 1, cIndex);
+	Vertex v2 = fetchVertex(primitiveID*3 + 2, cIndex);
 
 	v0.pos = gl_ObjectToWorldEXT * vec4(v0.pos, 1);
 	v1.pos = gl_ObjectToWorldEXT * vec4(v1.pos, 1);
@@ -111,7 +124,7 @@ void main()
 
 	vec3 normal = normalize(b0 * v0.normal + b1 * v1.normal + b2 * v2.normal);
 	
-	Material mat = fetchMaterial();
+	Material mat = fetchMaterial(cIndex);
 
 	vec3 ambient = mat.ambient;
 
@@ -154,6 +167,7 @@ void main()
 		}
 
 	hitValue.color = surfaceColor * (diffuse + ambient + specular);
+	//hitValue.color = vec3(iOff[0]*.05, .5, .5);
 	hitValue.origin = hitPos;
 	hitValue.direction = reflect(gl_WorldRayDirectionEXT, normal);
 }

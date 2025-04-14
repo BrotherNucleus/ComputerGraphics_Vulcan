@@ -43,12 +43,9 @@ vec3 traceRay(vec2 d) {
 	hitValue.contribution = 1.0;
 
 	vec3 color = vec3(0.0);
-	while (hitValue.depth< 5 && hitValue.contribution > 0.2) {
-		hitValue.depth += 1;
 		traceRayEXT(topLevelAS,gl_RayFlagsOpaqueEXT,0xff,0,0,0,hitValue.origin.xyz,tmin,hitValue.direction.xyz,tmax,0);
 		color += hitValue.color * hitValue.contribution;
-		hitValue.contribution *= 0.5;
-	}
+
 
 
 	return color;
