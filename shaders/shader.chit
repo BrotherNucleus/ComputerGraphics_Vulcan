@@ -28,7 +28,7 @@ struct Vertex {
 };
 
 struct BufferMat {
-	float dx, dy, dz, ax, ay, az, s, sh;
+	float dx, dy, dz, ax, ay, az, s, sh, refl;
 };
 
 struct Material {
@@ -36,6 +36,7 @@ struct Material {
 	vec3 ambient;
 	float specular;
 	float shininess;
+	float reflective;
 };
 
 struct lightBuffer {
@@ -93,6 +94,7 @@ Material fetchMaterial(int customIndex) {
  	m.ambient = am;
  	m.specular = matBuff[mOff[customIndex]].s;
  	m.shininess = matBuff[mOff[customIndex]].sh;
+	m.reflective = matBuff[mOff[customIndex]].refl;
  	return m;
  }
 
@@ -132,7 +134,7 @@ void main()
 
 	DirectionalLight light = fetchLight();
 	vec3 lightDirection = normalize(-hitPos-light.position);
-	float lightIntensity = max(dot(normal, lightDirection), 0.0);
+	float lightIntensity = max(dot(normal, lightDirection), 0.0) * 1.5;
 
 
 	vec3 diffuse = light.color * lightIntensity;
@@ -170,5 +172,9 @@ void main()
 	hitValue.color = surfaceColor * (diffuse + ambient + specular);
 	//hitValue.color = v1.pos;
 	hitValue.origin = hitPos;
+	if(mat.reflective < 1.0)
+	{
+		hitValue.contribution = 0.4;
+	}
 	hitValue.direction = reflect(gl_WorldRayDirectionEXT, normal);
 }
