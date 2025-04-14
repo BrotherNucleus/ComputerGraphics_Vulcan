@@ -332,6 +332,7 @@ int main() {
 
 	struct Vertex {
 		float pos[3];
+		float normal[3];
 	};
 	std::vector<Vertex> vertices;
 	std::vector<uint32_t> indeces;
@@ -361,10 +362,18 @@ int main() {
 				tinyobj::real_t vy = attrib.vertices[3 * idx.vertex_index + 1];
 				tinyobj::real_t vz = attrib.vertices[3 * idx.vertex_index + 2];
 
+				tinyobj::real_t nx = attrib.normals[3 * idx.normal_index + 0];
+				tinyobj::real_t ny = attrib.normals[3 * idx.normal_index + 1];
+				tinyobj::real_t nz = attrib.normals[3 * idx.normal_index + 2];
+
 				Vertex new_vert;
 				new_vert.pos[0] = vx;
 				new_vert.pos[1] = vy;
 				new_vert.pos[2] = vz;
+
+				new_vert.normal[0] = nx;
+				new_vert.normal[1] = ny;
+				new_vert.normal[2] = nz;
 
 				vertices.push_back(new_vert);
 				indeces.push_back(uint32_t(vertices.size() - 1));
