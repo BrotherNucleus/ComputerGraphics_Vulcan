@@ -42,16 +42,16 @@ struct lightBuffer {
 };
 
 layout(binding = 0) uniform accelerationStructureEXT topLevelAS;
-//layout(set = 0, binding = 3) buffer VertexBuffer {
-//	BufferVertex vertex_buffer[];
-//};
+layout(set = 0, binding = 3) buffer VertexBuffer {
+	BufferVertex vertex_buffer[];
+};
 layout(set = 0, binding = 4) buffer IndexBuffer {
 	int posI[];
 };
 layout(set = 0, binding = 6) buffer MaterialBuffer {
 	BufferMat matBuff;
 };
-layout(set = 0, binding = 3) uniform Camera {
+layout(set = 0, binding = 5) uniform Camera {
 	mat4 view;
 	mat4 proj;
 	int samples;
@@ -61,53 +61,33 @@ layout(set = 0, binding = 7) buffer Light {
 	lightBuffer lightBuf;
 };
 
-layout(set = 0, binding = 4) buffer mixedBuffer {
-	float mixedBuff[];
-};
-
 hitAttributeEXT vec2 attribs;
 
 vec3 fetchVertex( int index) {
-	int vertLen = int(mixedBuff[0]) * 3;
-	int i = int(mixedBuff[3 + vertLen + index]);
-	vec3 v;
-	v = vec3(mixedBuff[3 + i*3 + 0] ,mixedBuff[3 + i*3 + 1], mixedBuff[3 + i*3 + 2]);
-	return v; 
-}
+ 	int i = posI[index];
+ 	BufferVertex bv = vertex_buffer[i];
+ 	vec3 v;
+ 	v = vec3(bv.x ,bv.y, bv.z);
+ 	return v; 
+ }
 
 Material fetchMaterial() {
-	Material m;
-	BufferMat matBuff;
-	matBuff.dx = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1])];
-	matBuff.dy = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 1];
-	matBuff.dz = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 2];
-	matBuff.ax = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 3];
-	matBuff.ay = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 4];
-	matBuff.az = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 5];
-	matBuff.s = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 6];
-	matBuff.sh = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + 7];
-	vec3 dif = vec3(matBuff.dx, matBuff.dy, matBuff.dz);
-	vec3 am = vec3(matBuff.ax, matBuff.ay, matBuff.az);
-	m.diffuse = dif;
-	m.ambient = am;
-	m.specular = matBuff.s;
-	m.shininess = matBuff.sh;
-	return m;
-}
+ 	Material m;
+ 	vec3 dif = vec3(matBuff.dx, matBuff.dy, matBuff.dz);
+ 	vec3 am = vec3(matBuff.ax, matBuff.ay, matBuff.az);
+ 	m.diffuse = dif;
+ 	m.ambient = am;
+ 	m.specular = matBuff.s;
+ 	m.shininess = matBuff.sh;
+ 	return m;
+ }
 
 DirectionalLight fetchLight() {
-	DirectionalLight l;
-	lightBuffer lightBuf;
-	lightBuf.dx = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + int(mixedBuff[2])];
-	lightBuf.dy = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + int(mixedBuff[2]) + 1];
-	lightBuf.dz = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + int(mixedBuff[2]) + 2];
-	lightBuf.cx = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + int(mixedBuff[2]) + 3];
-	lightBuf.cy = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + int(mixedBuff[2]) + 4];
-	lightBuf.cz = mixedBuff[3 + int(mixedBuff[0]) * 3 + int(mixedBuff[1]) + int(mixedBuff[2]) + 5];
-	l.direction = vec3(lightBuf.dx, lightBuf.dy, lightBuf.dz);
-	l.color = vec3(lightBuf.cx, lightBuf.cy, lightBuf.cz);
-	return l;
-}
+ 	DirectionalLight l;
+ 	l.direction = vec3(lightBuf.dx, lightBuf.dy, lightBuf.dz);
+ 	l.color = vec3(lightBuf.cx, lightBuf.cy, lightBuf.cz);
+ 	return l;
+ }
 
 void main()
 {

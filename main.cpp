@@ -342,6 +342,7 @@ int main() {
 	std::vector<tinyobj::shape_t> shapes;
 	std::vector<tinyobj::material_t> materials;
 
+
 	//std::string warn;
 	std::string err;
 
@@ -382,38 +383,6 @@ int main() {
 		0.0f, 1.0f, 0.0f, 0.0f,
 		0.0f, 0.0f, 1.0f, 0.0f };
 
-	std::vector<float> mixedBufferData = {
-		(float)vertexCount,
-		(float)indexCount,
-		materialSize / sizeof(float)
-	};
-
-	for (Vertex v : vertices) {
-		mixedBufferData.push_back(v.pos[0]);
-		mixedBufferData.push_back(v.pos[1]);
-		mixedBufferData.push_back(v.pos[2]);
-	}
-
-	for (uint32_t i = 0; i < indexCount; i++) {
-		mixedBufferData.push_back((float)indeces[i]);
-	}
-
-	mixedBufferData.push_back(base.diffuse[0]);
-	mixedBufferData.push_back(base.diffuse[1]);
-	mixedBufferData.push_back(base.diffuse[2]);
-	mixedBufferData.push_back(base.ambient[0]);
-	mixedBufferData.push_back(base.ambient[1]);
-	mixedBufferData.push_back(base.ambient[2]);
-	mixedBufferData.push_back(base.specular);
-	mixedBufferData.push_back(base.shininess);
-
-	mixedBufferData.push_back(light.direction[0]);
-	mixedBufferData.push_back(light.direction[1]);
-	mixedBufferData.push_back(light.direction[2]);
-	mixedBufferData.push_back(light.color[0]);
-	mixedBufferData.push_back(light.color[1]);
-	mixedBufferData.push_back(light.color[2]);
-
 	const vk::BufferUsageFlags usageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress;
 	const vk::BufferUsageFlags VusageFlags = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eVertexBuffer;
 	const vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eDeviceLocal;
@@ -422,9 +391,8 @@ int main() {
 	VulkanBuffer vertexBuffer = createBuffer(vertices.size() * sizeof(Vertex), VusageFlags, memoryFlags, vertices.data());
 	VulkanBuffer indexBuffer = createBuffer(indeces.size() * sizeof(uint32_t), usageFlags, memoryFlags, indeces.data());
 	VulkanBuffer transformBuffer = createBuffer(sizeof(VkTransformMatrixKHR), usageFlags, memoryFlags, &transformMatrix);
-	//VulkanBuffer materialBuffer = createBuffer(materialSize, matUsageFlags, memoryFlags, &base);
-	//VulkanBuffer lightBuffer = createBuffer(sizeof(float)*6, matUsageFlags, memoryFlags, &light);
-	VulkanBuffer mixedBuffer = createBuffer(mixedBufferData.size() * sizeof(float), matUsageFlags, memoryFlags, mixedBufferData.data());
+	VulkanBuffer materialBuffer = createBuffer(materialSize, matUsageFlags, memoryFlags, &base);
+	VulkanBuffer lightBuffer = createBuffer(sizeof(float)*6, matUsageFlags, memoryFlags, &light);
 
 	vk::DeviceOrHostAddressConstKHR vertexBufferDeviceAddress;
 	vertexBufferDeviceAddress.deviceAddress = vertexBuffer.address;	
@@ -763,7 +731,7 @@ int main() {
 	vk::DescriptorSetLayout rtDescriptorSetLayout;
 	VulkanBuffer uniformBuffer;
 
-	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer, &mixedBuffer]()
+	[&device, &settings, &createBuffer, &renderTargetImage, &topAccelerationStructure, &rtDescriptorSet, &rtDescriptorSetLayout, &uniformBuffer, &vertexBuffer, &indexBuffer, &materialBuffer, &lightBuffer]()
 		{
 			std::cout << "Lambda Called\n";
 			struct UniformData
@@ -798,12 +766,11 @@ int main() {
 				{.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
 				{.binding = 1, .descriptorType = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
 				{.binding = 2, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR},
-				//{.binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
-				//{.binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
-				{.binding = 3, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				{.binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
-				//{.binding = 6, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
-				//{.binding = 7, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 5, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 6, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
+				{.binding = 7, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR},
 				};
 
 			rtDescriptorSetLayout = device.createDescriptorSetLayout({ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() });
@@ -812,11 +779,11 @@ int main() {
 				{.type = vk::DescriptorType::eStorageImage, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
-				//{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 				{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1 },
-				//{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
-				//{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
+				{.type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1 },
 			};
 
 			vk::DescriptorPool rtDescriptorPool = device.createDescriptorPool(
@@ -843,31 +810,26 @@ int main() {
 				.offset = 0,
 				.range = uniformBufferSize
 				};
-			//auto vertexBufferInfo = vk::DescriptorBufferInfo{
-			//	.buffer = vertexBuffer.buffer,
-			//	.offset = 0,
-			//	.range = VK_WHOLE_SIZE
-			//};
+			auto vertexBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = vertexBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE
+			};
 
-			//auto indexBufferInfo = vk::DescriptorBufferInfo{
-			//	.buffer = indexBuffer.buffer,
-			//	.offset = 0,
-			//	.range = VK_WHOLE_SIZE
-			//};
+			auto indexBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = indexBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE
+			};
 
-			//auto materialBufferInfo = vk::DescriptorBufferInfo{
-			//	.buffer = materialBuffer.buffer,
-			//	.offset = 0,
-			//	.range = VK_WHOLE_SIZE,
-			//};
+			auto materialBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = materialBuffer.buffer,
+				.offset = 0,
+				.range = VK_WHOLE_SIZE,
+			};
 
-			//auto lightBufferInfo = vk::DescriptorBufferInfo{
-			//	.buffer = lightBuffer.buffer,
-			//	.offset = 0,
-			//	.range = VK_WHOLE_SIZE
-			//};
-			auto mixedBufferInfo = vk::DescriptorBufferInfo{
-				.buffer = mixedBuffer.buffer,
+			auto lightBufferInfo = vk::DescriptorBufferInfo{
+				.buffer = lightBuffer.buffer,
 				.offset = 0,
 				.range = VK_WHOLE_SIZE
 			};
@@ -877,12 +839,11 @@ int main() {
 				{.pNext = &accelerationStructureInfo,
 				.dstSet = rtDescriptorSet,.dstBinding = 1,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eAccelerationStructureKHR },
 				{.dstSet = rtDescriptorSet,.dstBinding = 2,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
-				//{.dstSet = rtDescriptorSet,.dstBinding = 3,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &vertexBufferInfo},
-				//{.dstSet = rtDescriptorSet,.dstBinding = 4,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &indexBufferInfo},
-				{.dstSet = rtDescriptorSet,.dstBinding = 3,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
-				{.dstSet = rtDescriptorSet,.dstBinding = 4,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &mixedBufferInfo},
-				//{.dstSet = rtDescriptorSet,.dstBinding = 6,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &materialBufferInfo},
-				//{.dstSet = rtDescriptorSet,.dstBinding = 7,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &lightBufferInfo}
+				{.dstSet = rtDescriptorSet,.dstBinding = 3,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &vertexBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 4,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &indexBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 5,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eUniformBuffer,.pBufferInfo = &uniformBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 6,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &materialBufferInfo},
+				{.dstSet = rtDescriptorSet,.dstBinding = 7,.dstArrayElement = 0,.descriptorCount = 1,.descriptorType = vk::DescriptorType::eStorageBuffer,.pBufferInfo = &lightBufferInfo}
 				};
 
 				device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
