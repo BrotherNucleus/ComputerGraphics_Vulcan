@@ -12,6 +12,7 @@ struct stHitValue {
 };
 
 layout(location=0) rayPayloadInEXT stHitValue hitValue;
+layout(location=1) rayPayloadEXT bool isShadowed;
 
 struct DirectionalLight {
 	vec3 position;
@@ -150,18 +151,22 @@ void main()
 	float spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
 	vec3 specular = specularStrength * spec * light.color;
 
-	uint rayFlags = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT;
-	float rayMin = 0.001;
-	float rayMax = 10000.0;
-	float shadowBias = 0.001;
-	uint cullMask = 0xFFu;
-	vec3 shadowRayOrigin = hitPos+shadowBias*normal;
-	vec3 shadowRayDirection=lightDirection;
+	if(dot(normal, lightDirection) > 0.0)
+	{
+		uint rayFlags = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT | gl_RayFlagsOpaqueEXT;
+		float rayMin = 0.001;
+		float rayMax = 100.0;
+		float shadowBias = 0.001;
+		uint cullMask = 0xFF;
+		vec3 shadowRayOrigin = hitPos+shadowBias*normal;
+		vec3 shadowRayDirection=lightDirection;
+		isShadowed = true;
+		hitValue.miss=false;
 
-	hitValue.miss=false;
+		//shotshadowray
+		//traceRayEXT(topLevelAS,rayFlags,cullMask,0,0,1,shadowRayOrigin,rayMin,shadowRayDirection,rayMax,1);
+	}
 
-	//shotshadowray
-	//traceRayEXT(topLevelAS,rayFlags,cullMask,0u,0u,0u,shadowRayOrigin,rayMin,shadowRayDirection,rayMax,0);
 
 	float shadow=1.0;
 		if(!hitValue.miss )
@@ -174,7 +179,7 @@ void main()
 	hitValue.origin = hitPos;
 	if(mat.reflective < 1.0)
 	{
-		hitValue.contribution = 0.4;
+		hitValue.contribution *= 0.5;
 	}
 	hitValue.direction = reflect(gl_WorldRayDirectionEXT, normal);
 }

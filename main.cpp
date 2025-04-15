@@ -45,7 +45,7 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
-int sampleNumber = 1;
+int sampleNumber = 16;
 
 
 struct VulkanBuffer {
@@ -441,12 +441,11 @@ int main() {
 		}();
 
 	float queuePriority = 1.0f;
-	std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
-	vk::DeviceQueueCreateInfo tempQueueInfo;
-	tempQueueInfo.queueFamilyIndex = queueId;
-	tempQueueInfo.queueCount = 1;
-	tempQueueInfo.pQueuePriorities = &queuePriority;
-	queueCreateInfos.push_back(tempQueueInfo);
+	std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos = {
+		{.queueFamilyIndex = queueId,
+		.queueCount = 1,
+		.pQueuePriorities = &queuePriority}
+	};
 
 	vk::PhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures;
 	bufferDeviceAddressFeatures.bufferDeviceAddress = true;
@@ -1365,7 +1364,7 @@ int main() {
 		updateUniformBuffer(uniformData);
 
 		glfwPollEvents();
-		auto swapChainImageIndex = device.acquireNextImageKHR(swapChain, std::numeric_limits<uint64_t>::max(), semaphore2, {}).value;
+		auto swapChainImageIndex = device.acquireNextImageKHR(swapChain, std::numeric_limits<uint64_t>::max(), semaphore2, fence).value;
 		vk::PipelineStageFlags waitStageMask = vk::PipelineStageFlagBits::eTransfer;
 		device.resetFences(fence);
 		vk::SubmitInfo submitInfo = {
