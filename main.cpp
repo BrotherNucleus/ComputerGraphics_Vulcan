@@ -66,8 +66,9 @@ struct Material {
 	float specular;
 	float shininess;
 	float relfective;
+	float refractive;
 };
-float materialSize = sizeof(float) * 9;
+float materialSize = sizeof(float) * 10;
 
 struct Model {
 	std::vector<Vertex> vertices;
@@ -555,7 +556,8 @@ int main() {
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 0.5,
 		.shininess = 16,
-		.relfective = 0.0
+		.relfective = 0.0,
+		.refractive = 0.0
 	};
 
 	Material wallLeft = {
@@ -563,7 +565,8 @@ int main() {
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 1.0,
 		.shininess = 16,
-		.relfective = 0.0
+		.relfective = 0.0,
+		.refractive = 0.0
 	};
 
 	Material wallRight = {
@@ -571,15 +574,17 @@ int main() {
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 1.0,
 		.shininess = 16,
-		.relfective = 0.0
+		.relfective = 0.0,
+		.refractive = 0.0
 	};
 
 	Material sphereMat = {
 		.diffuse = {0.8, 0.1, 0.1},
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 1.0,
-		.shininess = 32,
-		.relfective = 0.0
+		.shininess = 64,
+		.relfective = 0.0,
+		.refractive = 1.0
 	};
 
 	Material sphereMat2 = {
@@ -587,7 +592,8 @@ int main() {
 		.ambient = {0.2, 0.2, 0.2},
 		.specular = 0.0,
 		.shininess = 2,
-		.relfective = 1.0
+		.relfective = 1.0,
+		.refractive = 0.0
 	};
 	
 	const char* filename = "Models/box.obj";

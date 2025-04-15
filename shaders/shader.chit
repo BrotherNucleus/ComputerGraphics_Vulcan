@@ -9,6 +9,9 @@ struct stHitValue {
 	vec3 origin;
 	vec3 direction;
 	float contribution;
+	bool reflection;
+	bool refraction;
+	bool refracted;
 };
 
 layout(location=0) rayPayloadInEXT stHitValue hitValue;
@@ -29,7 +32,7 @@ struct Vertex {
 };
 
 struct BufferMat {
-	float dx, dy, dz, ax, ay, az, s, sh, refl;
+	float dx, dy, dz, ax, ay, az, s, sh, refl, refr;
 };
 
 struct Material {
@@ -38,6 +41,7 @@ struct Material {
 	float specular;
 	float shininess;
 	float reflective;
+	float refractive;
 };
 
 struct lightBuffer {
@@ -96,6 +100,7 @@ Material fetchMaterial(int customIndex) {
  	m.specular = matBuff[mOff[customIndex]].s;
  	m.shininess = matBuff[mOff[customIndex]].sh;
 	m.reflective = matBuff[mOff[customIndex]].refl;
+	m.refractive = matBuff[mOff[customIndex]].refr;
  	return m;
  }
 
@@ -108,6 +113,9 @@ DirectionalLight fetchLight() {
 
 void main()
 {
+		if(!hitValue.refraction && hitValue.refracted) {
+		hitValue.refracted = false;
+	}
 	int primitiveID = gl_PrimitiveID;
 	int cIndex = gl_InstanceCustomIndexEXT;
 
@@ -133,9 +141,11 @@ void main()
 
 	vec3 hitPos = vec3(gl_WorldRayOriginEXT + gl_RayTmaxEXT * gl_WorldRayDirectionEXT);
 
+	hitValue.origin = hitPos;
+
 	DirectionalLight light = fetchLight();
 	vec3 lightDirection = normalize(-hitPos-light.position);
-	float lightIntensity = max(dot(normal, lightDirection), 0.0) * 1.5;
+	float lightIntensity = max(dot(normal, lightDirection), 0.0) * 1.0;
 
 
 	vec3 diffuse = light.color * lightIntensity;
@@ -176,10 +186,39 @@ void main()
 
 	hitValue.color = surfaceColor * (diffuse + ambient + specular);
 	//hitValue.color = v1.pos;
-	hitValue.origin = hitPos;
+	if(mat.refractive > 0.0 && !hitValue.refracted) {
+		vec3 refOrig = hitPos + 0.001 * -normal;
+		float nair = 1.0;
+		float nglass = 1.5;
+		//float thetaI = acos(dot(normal, -gl_WorldRayDirectionEXT));
+		vec3 refDir = refract(gl_WorldRayDirectionEXT, normal, nair/nglass);
+		hitValue.direction = refDir;
+		hitValue.refraction = true;
+		hitValue.origin = refOrig;
+		hitValue.refracted = true;
+		return;
+	}
+
+	if(hitValue.refracted)
+	{
+		vec3 refOrig = hitPos + 0.001 * normal;
+		float nair = 1.0;
+		float nglass = 1.5;
+		vec3 refDir = refract(-hitValue.direction, -normal, nglass/nair);
+		hitValue.direction = refDir;
+		hitValue.origin = refOrig;
+		hitValue.refraction = false;
+		return;
+	}
+
+
 	if(mat.reflective < 1.0)
 	{
-		hitValue.contribution *= 0.5;
+		hitValue.reflection = false;
+	} 
+	else
+	{
+		hitValue.reflection = true;
 	}
 	hitValue.direction = reflect(gl_WorldRayDirectionEXT, normal);
 }
